@@ -1,0 +1,15 @@
+백엔드 실행:
+cd G:\stockTrade\Construction-Management\backend
+.\gradlew.bat bootRun
+프론트엔드 실행:
+cd G:\stockTrade\Construction-Management\frontend
+npm install
+npm run dev
+접속 주소:
+Frontend: http://localhost:5173
+Backend API: http://localhost:8080
+H2 Console: http://localhost:8080/h2-console
+H2 접속 정보:
+JDBC URL: jdbc:h2:mem:construction_management
+User Name: sa
+Password: 비워두기
