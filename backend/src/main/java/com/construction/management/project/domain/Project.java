@@ -164,4 +164,8 @@ public class Project {
 	public void updateTargetProfitRate(BigDecimal targetProfitRate) {
 		this.targetProfitRate = targetProfitRate == null ? BigDecimal.ZERO : targetProfitRate;
 	}
+
+	public void changeStatus(ProjectStatus status) {
+		this.status = status == null ? this.status : status;
+	}
 }

@@ -32,17 +32,20 @@ public class ExecutionBudgetDetailService {
 	private final CustomerContractItemRepository customerContractItemRepository;
 	private final ProjectExecutionBudgetItemRepository itemRepository;
 	private final ProjectExecutionBudgetDetailRepository detailRepository;
+	private final ProjectSettlementService projectSettlementService;
 
 	public ExecutionBudgetDetailService(
 			ProjectRepository projectRepository,
 			CustomerContractItemRepository customerContractItemRepository,
 			ProjectExecutionBudgetItemRepository itemRepository,
-			ProjectExecutionBudgetDetailRepository detailRepository
+			ProjectExecutionBudgetDetailRepository detailRepository,
+			ProjectSettlementService projectSettlementService
 	) {
 		this.projectRepository = projectRepository;
 		this.customerContractItemRepository = customerContractItemRepository;
 		this.itemRepository = itemRepository;
 		this.detailRepository = detailRepository;
+		this.projectSettlementService = projectSettlementService;
 	}
 
 	@Transactional(readOnly = true)
@@ -53,6 +56,7 @@ public class ExecutionBudgetDetailService {
 
 	@Transactional
 	public ExecutionBudgetDetailResponse saveDetails(String projectId, ExecutionBudgetDetailRequest request) {
+		projectSettlementService.assertNotSettled(projectId);
 		Project project = getProject(projectId);
 		detailRepository.deleteByProjectId(projectId);
 

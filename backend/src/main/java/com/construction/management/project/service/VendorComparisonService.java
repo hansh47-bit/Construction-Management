@@ -25,12 +25,14 @@ public class VendorComparisonService {
 	private final ProjectExecutionBudgetItemRepository budgetItemRepository;
 	private final VendorComparisonRepository comparisonRepository;
 	private final PoRequisitionRepository requisitionRepository;
+	private final ProjectSettlementService projectSettlementService;
 
-	public VendorComparisonService(ProjectRepository projectRepository, ProjectExecutionBudgetItemRepository budgetItemRepository, VendorComparisonRepository comparisonRepository, PoRequisitionRepository requisitionRepository) {
+	public VendorComparisonService(ProjectRepository projectRepository, ProjectExecutionBudgetItemRepository budgetItemRepository, VendorComparisonRepository comparisonRepository, PoRequisitionRepository requisitionRepository, ProjectSettlementService projectSettlementService) {
 		this.projectRepository = projectRepository;
 		this.budgetItemRepository = budgetItemRepository;
 		this.comparisonRepository = comparisonRepository;
 		this.requisitionRepository = requisitionRepository;
+		this.projectSettlementService = projectSettlementService;
 	}
 
 	@Transactional(readOnly = true)
@@ -42,6 +44,7 @@ public class VendorComparisonService {
 
 	@Transactional
 	public VendorComparisonResponse saveComparisons(String projectId, String itemId, VendorComparisonRequest request) {
+		projectSettlementService.assertNotSettled(projectId);
 		Project project = getProject(projectId);
 		ProjectExecutionBudgetItem item = getItem(itemId);
 		long selectedCount = request.comparisons().stream().filter(VendorComparisonRequest.Item::selected).count();
@@ -89,6 +92,7 @@ public class VendorComparisonService {
 
 	@Transactional
 	public PurchaseOrderDraftResponse requestPurchaseOrder(String projectId, String itemId) {
+		projectSettlementService.assertNotSettled(projectId);
 		Project project = getProject(projectId);
 		ProjectExecutionBudgetItem item = getItem(itemId);
 		VendorComparison selected = comparisonRepository.findByProjectIdAndExecutionItemIdAndSelectedTrue(projectId, itemId)

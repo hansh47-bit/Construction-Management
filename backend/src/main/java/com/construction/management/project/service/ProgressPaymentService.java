@@ -33,13 +33,15 @@ public class ProgressPaymentService {
 	private final PoChangeRepository poChangeRepository;
 	private final ProgressClaimRepository progressClaimRepository;
 	private final ActualPaymentRepository actualPaymentRepository;
+	private final ProjectSettlementService projectSettlementService;
 
-	public ProgressPaymentService(ProjectRepository projectRepository, PurchaseOrderRepository purchaseOrderRepository, PoChangeRepository poChangeRepository, ProgressClaimRepository progressClaimRepository, ActualPaymentRepository actualPaymentRepository) {
+	public ProgressPaymentService(ProjectRepository projectRepository, PurchaseOrderRepository purchaseOrderRepository, PoChangeRepository poChangeRepository, ProgressClaimRepository progressClaimRepository, ActualPaymentRepository actualPaymentRepository, ProjectSettlementService projectSettlementService) {
 		this.projectRepository = projectRepository;
 		this.purchaseOrderRepository = purchaseOrderRepository;
 		this.poChangeRepository = poChangeRepository;
 		this.progressClaimRepository = progressClaimRepository;
 		this.actualPaymentRepository = actualPaymentRepository;
+		this.projectSettlementService = projectSettlementService;
 	}
 
 	@Transactional(readOnly = true)
@@ -50,6 +52,7 @@ public class ProgressPaymentService {
 
 	@Transactional
 	public ProgressPaymentResponse createClaim(String projectId, ProgressPaymentRequest.Claim request) {
+		projectSettlementService.assertNotSettled(projectId);
 		Project project = getProject(projectId);
 		PurchaseOrder po = getPo(projectId, request.poId());
 		BigDecimal currentPoAmount = currentPoAmount(po);
@@ -67,6 +70,7 @@ public class ProgressPaymentService {
 
 	@Transactional
 	public ProgressPaymentResponse approveClaim(String projectId, String claimId) {
+		projectSettlementService.assertNotSettled(projectId);
 		Project project = getProject(projectId);
 		ProgressClaim claim = progressClaimRepository.findById(claimId).orElseThrow(() -> new EntityNotFoundException("기성을 찾을 수 없습니다: " + claimId));
 		getPo(projectId, claim.getPoId());
@@ -77,6 +81,7 @@ public class ProgressPaymentService {
 
 	@Transactional
 	public ProgressPaymentResponse createPayment(String projectId, String claimId, ProgressPaymentRequest.Payment request) {
+		projectSettlementService.assertNotSettled(projectId);
 		Project project = getProject(projectId);
 		ProgressClaim claim = progressClaimRepository.findById(claimId).orElseThrow(() -> new EntityNotFoundException("기성을 찾을 수 없습니다: " + claimId));
 		getPo(projectId, claim.getPoId());

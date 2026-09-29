@@ -4,6 +4,7 @@ import com.construction.management.project.domain.ContractFile;
 import com.construction.management.project.service.CustomerContractService;
 import com.construction.management.project.service.ExecutionBudgetDetailService;
 import com.construction.management.project.service.ProjectService;
+import com.construction.management.project.service.ProjectSettlementService;
 import com.construction.management.project.service.ProgressPaymentService;
 import com.construction.management.project.service.VendorComparisonService;
 import jakarta.validation.Valid;
@@ -34,19 +35,22 @@ public class ProjectController {
 	private final ExecutionBudgetDetailService executionBudgetDetailService;
 	private final VendorComparisonService vendorComparisonService;
 	private final ProgressPaymentService progressPaymentService;
+	private final ProjectSettlementService projectSettlementService;
 
 	public ProjectController(
 			ProjectService projectService,
 			CustomerContractService customerContractService,
 			ExecutionBudgetDetailService executionBudgetDetailService,
 			VendorComparisonService vendorComparisonService,
-			ProgressPaymentService progressPaymentService
+			ProgressPaymentService progressPaymentService,
+			ProjectSettlementService projectSettlementService
 	) {
 		this.projectService = projectService;
 		this.customerContractService = customerContractService;
 		this.executionBudgetDetailService = executionBudgetDetailService;
 		this.vendorComparisonService = vendorComparisonService;
 		this.progressPaymentService = progressPaymentService;
+		this.projectSettlementService = projectSettlementService;
 	}
 
 	@PostMapping
@@ -140,6 +144,19 @@ public class ProjectController {
 	@GetMapping("/{projectId}/progress-payments")
 	public ProgressPaymentResponse getProgressPayments(@PathVariable String projectId) {
 		return progressPaymentService.getStatus(projectId);
+	}
+
+	@GetMapping("/{projectId}/settlement")
+	public ProjectSettlementResponse getSettlement(@PathVariable String projectId) {
+		return projectSettlementService.getSettlement(projectId);
+	}
+
+	@PostMapping("/{projectId}/settlement/complete")
+	public ProjectSettlementResponse completeSettlement(
+			@PathVariable String projectId,
+			@RequestBody ProjectSettlementCompleteRequest request
+	) {
+		return projectSettlementService.completeSettlement(projectId, request);
 	}
 
 	@PostMapping("/{projectId}/progress-claims")
