@@ -38,10 +38,22 @@ public class PoRequisition {
 	private String selectionReason;
 
 	@Column(name = "approval_status", nullable = false)
-	private String approvalStatus = "REQUESTED";
+	private String approvalStatus = ApprovalStatus.REQUESTED.name();
 
 	@Column(name = "requested_by", nullable = false)
 	private String requestedBy;
+
+	@Column(name = "approver")
+	private String approver;
+
+	@Column(name = "comment", length = 1000)
+	private String comment;
+
+	@Column(name = "decided_at")
+	private LocalDateTime decidedAt;
+
+	@Column(name = "approval_id", length = 64)
+	private String approvalId;
 
 	@Column(name = "created_at", nullable = false, updatable = false)
 	private LocalDateTime createdAt;
@@ -65,4 +77,33 @@ public class PoRequisition {
 	void onCreate() {
 		this.createdAt = LocalDateTime.now();
 	}
+
+	public void linkApproval(String approvalId) {
+		this.approvalId = approvalId;
+	}
+
+	public void approve(String approver, String comment) {
+		this.approvalStatus = ApprovalStatus.APPROVED.name();
+		this.approver = approver;
+		this.comment = comment;
+		this.decidedAt = LocalDateTime.now();
+	}
+
+	public void reject(String approver, String comment) {
+		this.approvalStatus = ApprovalStatus.REJECTED.name();
+		this.approver = approver;
+		this.comment = comment;
+		this.decidedAt = LocalDateTime.now();
+	}
+
+	public String getRequisitionId() { return requisitionId; }
+	public String getProjectId() { return projectId; }
+	public String getExecutionItemId() { return executionItemId; }
+	public String getSelectedComparisonId() { return selectedComparisonId; }
+	public BigDecimal getApprovedBudgetAmount() { return approvedBudgetAmount; }
+	public BigDecimal getPoAmount() { return poAmount; }
+	public BigDecimal getBudgetVariance() { return budgetVariance; }
+	public String getSelectionReason() { return selectionReason; }
+	public String getApprovalStatus() { return approvalStatus; }
+	public String getApprovalId() { return approvalId; }
 }

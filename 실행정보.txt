@@ -1,8 +1,8 @@
 백엔드 실행:
-cd G:\stockTrade\Construction-Management\backend
+cd c:\dev\Construction-Management\backend
 .\gradlew.bat bootRun
 프론트엔드 실행:
-cd G:\stockTrade\Construction-Management\frontend
+cd c:\dev\Construction-Management\frontend
 npm install
 npm run dev
 접속 주소:

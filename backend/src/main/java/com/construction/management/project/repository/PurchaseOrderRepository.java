@@ -6,4 +6,5 @@ import org.springframework.data.jpa.repository.JpaRepository;
 
 public interface PurchaseOrderRepository extends JpaRepository<PurchaseOrder, String> {
 	List<PurchaseOrder> findByProjectId(String projectId);
+	boolean existsByProjectIdAndBudgetId(String projectId, String budgetId);
 }

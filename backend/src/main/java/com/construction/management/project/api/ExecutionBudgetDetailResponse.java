@@ -17,6 +17,12 @@ public record ExecutionBudgetDetailResponse(
 		BigDecimal targetCostLimit,
 		@JsonProperty("approval_status")
 		String approvalStatus,
+		@JsonProperty("approval_id")
+		String approvalId,
+		@JsonProperty("approval_comment")
+		String approvalComment,
+		@JsonProperty("approved_amount")
+		BigDecimal approvedAmount,
 		@JsonProperty("total_detail_amount")
 		BigDecimal totalDetailAmount,
 		@JsonProperty("over_target_limit")

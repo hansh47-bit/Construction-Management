@@ -1,6 +1,7 @@
 package com.construction.management.project.api;
 
 import com.construction.management.project.domain.ContractFile;
+import com.construction.management.project.service.ApprovalService;
 import com.construction.management.project.service.CustomerContractService;
 import com.construction.management.project.service.ExecutionBudgetDetailService;
 import com.construction.management.project.service.ProjectService;
@@ -36,6 +37,7 @@ public class ProjectController {
 	private final VendorComparisonService vendorComparisonService;
 	private final ProgressPaymentService progressPaymentService;
 	private final ProjectSettlementService projectSettlementService;
+	private final ApprovalService approvalService;
 
 	public ProjectController(
 			ProjectService projectService,
@@ -43,7 +45,8 @@ public class ProjectController {
 			ExecutionBudgetDetailService executionBudgetDetailService,
 			VendorComparisonService vendorComparisonService,
 			ProgressPaymentService progressPaymentService,
-			ProjectSettlementService projectSettlementService
+			ProjectSettlementService projectSettlementService,
+			ApprovalService approvalService
 	) {
 		this.projectService = projectService;
 		this.customerContractService = customerContractService;
@@ -51,6 +54,7 @@ public class ProjectController {
 		this.vendorComparisonService = vendorComparisonService;
 		this.progressPaymentService = progressPaymentService;
 		this.projectSettlementService = projectSettlementService;
+		this.approvalService = approvalService;
 	}
 
 	@PostMapping
@@ -60,23 +64,23 @@ public class ProjectController {
 	}
 
 	@GetMapping
-	public List<ProjectResponse> search(@RequestParam(required = false) String keyword) {
+	public List<ProjectResponse> search(@RequestParam(name = "keyword", required = false) String keyword) {
 		return projectService.search(keyword);
 	}
 
 	@GetMapping("/{projectId}/integrated-summary")
-	public IntegratedSummaryResponse getIntegratedSummary(@PathVariable String projectId) {
+	public IntegratedSummaryResponse getIntegratedSummary(@PathVariable("projectId") String projectId) {
 		return projectService.getIntegratedSummary(projectId);
 	}
 
 	@GetMapping("/{projectId}/contracts")
-	public CustomerContractResponse getCustomerContract(@PathVariable String projectId) {
+	public CustomerContractResponse getCustomerContract(@PathVariable("projectId") String projectId) {
 		return customerContractService.getContract(projectId);
 	}
 
 	@PutMapping("/{projectId}/contracts")
 	public CustomerContractResponse saveCustomerContract(
-			@PathVariable String projectId,
+			@PathVariable("projectId") String projectId,
 			@Valid @RequestBody CustomerContractRequest request
 	) {
 		return customerContractService.saveContract(projectId, request);
@@ -84,15 +88,18 @@ public class ProjectController {
 
 	@PostMapping(path = "/{projectId}/contract-files", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
 	public CustomerContractResponse uploadContractFile(
-			@PathVariable String projectId,
-			@RequestParam(defaultValue = "CONTRACT") String fileType,
-			@RequestParam MultipartFile file
+			@PathVariable("projectId") String projectId,
+			@RequestParam(name = "fileType", defaultValue = "CONTRACT") String fileType,
+			@RequestParam("file") MultipartFile file
 	) {
 		return customerContractService.uploadFile(projectId, fileType, file);
 	}
 
 	@GetMapping("/{projectId}/contract-files/{fileId}")
-	public ResponseEntity<Resource> downloadContractFile(@PathVariable String projectId, @PathVariable String fileId) {
+	public ResponseEntity<Resource> downloadContractFile(
+			@PathVariable("projectId") String projectId,
+			@PathVariable("fileId") String fileId
+	) {
 		ContractFile file = customerContractService.getFile(projectId, fileId);
 		Resource resource = customerContractService.loadFileResource(file);
 		return ResponseEntity.ok()
@@ -105,55 +112,72 @@ public class ProjectController {
 	}
 
 	@GetMapping("/{projectId}/execution-budget-details")
-	public ExecutionBudgetDetailResponse getExecutionBudgetDetails(@PathVariable String projectId) {
+	public ExecutionBudgetDetailResponse getExecutionBudgetDetails(@PathVariable("projectId") String projectId) {
 		return executionBudgetDetailService.getDetails(projectId);
 	}
 
 	@PutMapping("/{projectId}/execution-budget-details")
 	public ExecutionBudgetDetailResponse saveExecutionBudgetDetails(
-			@PathVariable String projectId,
+			@PathVariable("projectId") String projectId,
 			@Valid @RequestBody ExecutionBudgetDetailRequest request
 	) {
 		return executionBudgetDetailService.saveDetails(projectId, request);
 	}
 
+	@PostMapping("/{projectId}/execution-budget-details/request-approval")
+	public ApprovalResponse requestExecutionBudgetApproval(
+			@PathVariable("projectId") String projectId,
+			@RequestBody(required = false) ApprovalRequest request
+	) {
+		return approvalService.requestExecutionBudget(projectId, request);
+	}
+
 	@GetMapping("/{projectId}/execution-items/{itemId}/comparisons")
-	public VendorComparisonResponse getVendorComparisons(@PathVariable String projectId, @PathVariable String itemId) {
+	public VendorComparisonResponse getVendorComparisons(
+			@PathVariable("projectId") String projectId,
+			@PathVariable("itemId") String itemId
+	) {
 		return vendorComparisonService.getComparisons(projectId, itemId);
 	}
 
 	@PostMapping("/{projectId}/execution-items/{itemId}/comparisons")
 	public VendorComparisonResponse saveVendorComparisons(
-			@PathVariable String projectId,
-			@PathVariable String itemId,
+			@PathVariable("projectId") String projectId,
+			@PathVariable("itemId") String itemId,
 			@Valid @RequestBody VendorComparisonRequest request
 	) {
 		return vendorComparisonService.saveComparisons(projectId, itemId, request);
 	}
 
 	@GetMapping("/{projectId}/purchase-orders/draft/{itemId}")
-	public PurchaseOrderDraftResponse getPurchaseOrderDraft(@PathVariable String projectId, @PathVariable String itemId) {
+	public PurchaseOrderDraftResponse getPurchaseOrderDraft(
+			@PathVariable("projectId") String projectId,
+			@PathVariable("itemId") String itemId
+	) {
 		return vendorComparisonService.getPurchaseOrderDraft(projectId, itemId);
 	}
 
 	@PostMapping("/{projectId}/purchase-orders/draft/{itemId}/request")
-	public PurchaseOrderDraftResponse requestPurchaseOrder(@PathVariable String projectId, @PathVariable String itemId) {
+	public PurchaseOrderDraftResponse requestPurchaseOrder(
+			@PathVariable("projectId") String projectId,
+			@PathVariable("itemId") String itemId
+	) {
 		return vendorComparisonService.requestPurchaseOrder(projectId, itemId);
 	}
 
 	@GetMapping("/{projectId}/progress-payments")
-	public ProgressPaymentResponse getProgressPayments(@PathVariable String projectId) {
+	public ProgressPaymentResponse getProgressPayments(@PathVariable("projectId") String projectId) {
 		return progressPaymentService.getStatus(projectId);
 	}
 
 	@GetMapping("/{projectId}/settlement")
-	public ProjectSettlementResponse getSettlement(@PathVariable String projectId) {
+	public ProjectSettlementResponse getSettlement(@PathVariable("projectId") String projectId) {
 		return projectSettlementService.getSettlement(projectId);
 	}
 
 	@PostMapping("/{projectId}/settlement/complete")
 	public ProjectSettlementResponse completeSettlement(
-			@PathVariable String projectId,
+			@PathVariable("projectId") String projectId,
 			@RequestBody ProjectSettlementCompleteRequest request
 	) {
 		return projectSettlementService.completeSettlement(projectId, request);
@@ -161,21 +185,24 @@ public class ProjectController {
 
 	@PostMapping("/{projectId}/progress-claims")
 	public ProgressPaymentResponse createProgressClaim(
-			@PathVariable String projectId,
+			@PathVariable("projectId") String projectId,
 			@RequestBody ProgressPaymentRequest.Claim request
 	) {
 		return progressPaymentService.createClaim(projectId, request);
 	}
 
 	@PostMapping("/{projectId}/progress-claims/{claimId}/approve")
-	public ProgressPaymentResponse approveProgressClaim(@PathVariable String projectId, @PathVariable String claimId) {
+	public ProgressPaymentResponse approveProgressClaim(
+			@PathVariable("projectId") String projectId,
+			@PathVariable("claimId") String claimId
+	) {
 		return progressPaymentService.approveClaim(projectId, claimId);
 	}
 
 	@PostMapping("/{projectId}/progress-claims/{claimId}/payments")
 	public ProgressPaymentResponse createPayment(
-			@PathVariable String projectId,
-			@PathVariable String claimId,
+			@PathVariable("projectId") String projectId,
+			@PathVariable("claimId") String claimId,
 			@RequestBody ProgressPaymentRequest.Payment request
 	) {
 		return progressPaymentService.createPayment(projectId, claimId, request);

@@ -135,6 +135,9 @@ type ExecutionBudgetDetailResponse = {
   contract_supply_amount: number
   target_cost_limit: number
   approval_status: string
+  approval_id?: string
+  approval_comment?: string
+  approved_amount?: number
   total_detail_amount: number
   over_target_limit: boolean
   summary_by_item: ExecutionBudgetSummaryItem[]
@@ -179,6 +182,27 @@ type PurchaseOrderDraft = {
   display_color: string
   selection_reason: string
   approval_status: string
+}
+
+type ApprovalItem = {
+  approval_id: string
+  project_id: string
+  project_code: string
+  project_name: string
+  approval_type: string
+  target_id: string
+  title: string
+  requested_amount: number
+  previous_amount: number
+  variance_amount: number
+  request_user: string
+  request_reason?: string
+  status: string
+  approver?: string
+  comment?: string
+  requested_at?: string
+  decided_at?: string
+  detail?: unknown
 }
 
 type PaymentStatus = {
@@ -268,7 +292,7 @@ type ProjectForm = {
 }
 
 const statuses = ['견적', '계약', '공사준비', '공사진행', '준공', '정산중', '정산완료', '보류']
-const tabs = ['고객 견적·계약 관리', '세부실행예산', '업체 비교견적', '공종별 흐름 추적', '계약/발주/변경이력', '기성 및 지급 현황', '준공정산', '증빙 및 파일']
+const tabs = ['고객 견적·계약 관리', '세부실행예산', '업체 비교견적', '통합결재함', '공종별 흐름 추적', '계약/발주/변경이력', '기성 및 지급 현황', '준공정산', '증빙 및 파일']
 const costTypes = ['외주비', '폐기물', '인건비', '장비비', '운반비', '자재비', '현장경비']
 const vatTypes = ['별도', '포함', '면세']
 
@@ -362,6 +386,11 @@ function App() {
   const [vendorComparison, setVendorComparison] = useState<VendorComparisonResponse | null>(null)
   const [vendorComparisons, setVendorComparisons] = useState<VendorComparisonItem[]>([])
   const [purchaseOrderDraft, setPurchaseOrderDraft] = useState<PurchaseOrderDraft | null>(null)
+  const [approvals, setApprovals] = useState<ApprovalItem[]>([])
+  const [selectedApproval, setSelectedApproval] = useState<ApprovalItem | null>(null)
+  const [approvalStatusFilter, setApprovalStatusFilter] = useState('REQUESTED')
+  const [approvalTypeFilter, setApprovalTypeFilter] = useState('')
+  const [rejectComment, setRejectComment] = useState('')
   const [progressPayment, setProgressPayment] = useState<ProgressPaymentResponse | null>(null)
   const [settlement, setSettlement] = useState<ProjectSettlement | null>(null)
   const [selectedPoId, setSelectedPoId] = useState('')
@@ -396,6 +425,8 @@ function App() {
       setVendorComparison(null)
       setVendorComparisons([])
       setPurchaseOrderDraft(null)
+      setApprovals([])
+      setSelectedApproval(null)
       setProgressPayment(null)
       setSettlement(null)
       setSelectedPoId('')
@@ -441,9 +472,17 @@ function App() {
     }
     loadCustomerContract(selectedProjectId)
     loadExecutionBudgetDetails(selectedProjectId)
+    loadApprovals()
     loadProgressPayments(selectedProjectId)
     loadSettlement(selectedProjectId)
   }, [selectedProjectId])
+
+  useEffect(() => {
+    if (!selectedProjectId) {
+      return
+    }
+    loadApprovals()
+  }, [approvalStatusFilter, approvalTypeFilter])
 
   const selectedProject = useMemo(
     () => projects.find((project) => project.project_id === selectedProjectId) ?? summary?.project_info,
@@ -628,6 +667,70 @@ function App() {
     await loadSettlement(selectedProjectId)
   }
 
+  async function requestExecutionBudgetApproval() {
+    if (!selectedProjectId) return
+    const response = await fetch(apiUrl(`/api/v1/projects/${selectedProjectId}/execution-budget-details/request-approval`), {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ request_user: 'system', request_reason: '최초 실행예산 승인 요청' }),
+    })
+    if (!response.ok) {
+      setError(`실행예산 결재요청 실패: ${response.status}`)
+      return
+    }
+    await response.json()
+    await loadExecutionBudgetDetails(selectedProjectId)
+    await loadApprovals()
+  }
+
+  async function loadApprovals() {
+    if (!selectedProjectId) return
+    const params = new URLSearchParams()
+    params.set('projectId', selectedProjectId)
+    if (approvalStatusFilter) params.set('status', approvalStatusFilter)
+    if (approvalTypeFilter) params.set('type', approvalTypeFilter)
+    const response = await fetch(apiUrl(`/api/v1/approvals?${params.toString()}`))
+    if (!response.ok) {
+      setError(`통합결재함 조회 실패: ${response.status}`)
+      return
+    }
+    const data: ApprovalItem[] = await response.json()
+    setApprovals(data)
+    setSelectedApproval((current) => current ? data.find((approval) => approval.approval_id === current.approval_id) ?? null : null)
+  }
+
+  async function loadApprovalDetail(approvalId: string) {
+    const response = await fetch(apiUrl(`/api/v1/approvals/${approvalId}`))
+    if (!response.ok) {
+      setError(`결재 상세 조회 실패: ${response.status}`)
+      return
+    }
+    setSelectedApproval(await response.json())
+  }
+
+  async function decideApproval(approvalId: string, decision: 'approve' | 'reject') {
+    const response = await fetch(apiUrl(`/api/v1/approvals/${approvalId}/${decision}`), {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ approver: '대표', comment: decision === 'reject' ? rejectComment : '승인' }),
+    })
+    if (!response.ok) {
+      setError(`결재 처리 실패: ${response.status}`)
+      return
+    }
+    setRejectComment('')
+    setSelectedApproval(await response.json())
+    await loadApprovals()
+    if (selectedProjectId) {
+      await loadExecutionBudgetDetails(selectedProjectId)
+      if (selectedExecutionItemId) await loadVendorComparisons(selectedProjectId, selectedExecutionItemId)
+      const summaryResponse = await fetch(apiUrl(`/api/v1/projects/${selectedProjectId}/integrated-summary`))
+      if (summaryResponse.ok) setSummary(await summaryResponse.json())
+      await loadProgressPayments(selectedProjectId)
+      await loadSettlement(selectedProjectId)
+    }
+  }
+
   function updateExecutionDetail(index: number, field: keyof ExecutionBudgetDetail, value: string) {
     setExecutionDetails((details) =>
       details.map((detail, detailIndex) => {
@@ -722,6 +825,7 @@ function App() {
       return
     }
     setPurchaseOrderDraft(await response.json())
+    await loadApprovals()
   }
 
   function updateVendorComparison(index: number, field: keyof VendorComparisonItem, value: string | boolean) {
@@ -1090,6 +1194,7 @@ function App() {
                     summary={executionSummary}
                     totalAmount={executionTotal}
                     saveExecutionBudgetDetails={saveExecutionBudgetDetails}
+                    requestExecutionBudgetApproval={requestExecutionBudgetApproval}
                     updateExecutionDetail={updateExecutionDetail}
                     addExecutionDetail={addExecutionDetail}
                     removeExecutionDetail={removeExecutionDetail}
@@ -1108,6 +1213,21 @@ function App() {
                     updateVendorComparison={updateVendorComparison}
                     addVendorComparison={addVendorComparison}
                     removeVendorComparison={removeVendorComparison}
+                  />
+                )}
+                {activeTab === '통합결재함' && (
+                  <ApprovalInboxPanel
+                    approvals={approvals}
+                    selectedApproval={selectedApproval}
+                    statusFilter={approvalStatusFilter}
+                    typeFilter={approvalTypeFilter}
+                    rejectComment={rejectComment}
+                    setStatusFilter={setApprovalStatusFilter}
+                    setTypeFilter={setApprovalTypeFilter}
+                    setRejectComment={setRejectComment}
+                    loadApprovalDetail={loadApprovalDetail}
+                    approveApproval={(approvalId) => decideApproval(approvalId, 'approve')}
+                    rejectApproval={(approvalId) => decideApproval(approvalId, 'reject')}
                   />
                 )}
                 {activeTab === '기성 및 지급 현황' && progressPayment && (
@@ -1133,7 +1253,7 @@ function App() {
                   />
                 )}
                 {activeTab === '공종별 흐름 추적' && <CostBreakdownTable rows={summary.cost_breakdown} />}
-                {activeTab !== '고객 견적·계약 관리' && activeTab !== '세부실행예산' && activeTab !== '업체 비교견적' && activeTab !== '기성 및 지급 현황' && activeTab !== '준공정산' && activeTab !== '공종별 흐름 추적' && (
+                {activeTab !== '고객 견적·계약 관리' && activeTab !== '세부실행예산' && activeTab !== '업체 비교견적' && activeTab !== '통합결재함' && activeTab !== '기성 및 지급 현황' && activeTab !== '준공정산' && activeTab !== '공종별 흐름 추적' && (
                   <div className="rounded-md border border-dashed border-slate-300 bg-slate-50 p-8 text-center text-sm text-slate-500">
                     {activeTab} 상세 목록은 다음 단계 API에서 확장 예정입니다. 현재 계산값은 상단 통합현황에 반영되어 있습니다.
                   </div>
@@ -1451,6 +1571,7 @@ function ExecutionBudgetDetailPanel({
   summary,
   totalAmount,
   saveExecutionBudgetDetails,
+  requestExecutionBudgetApproval,
   updateExecutionDetail,
   addExecutionDetail,
   removeExecutionDetail,
@@ -1460,10 +1581,19 @@ function ExecutionBudgetDetailPanel({
   summary: ExecutionBudgetSummaryItem[]
   totalAmount: number
   saveExecutionBudgetDetails: () => void
+  requestExecutionBudgetApproval: () => void
   updateExecutionDetail: (index: number, field: keyof ExecutionBudgetDetail, value: string) => void
   addExecutionDetail: (copyIndex?: number) => void
   removeExecutionDetail: (index: number) => void
 }) {
+  const pageSize = 10
+  const [currentPage, setCurrentPage] = useState(1)
+  const pageCount = Math.max(1, Math.ceil(details.length / pageSize))
+  const safeCurrentPage = Math.min(currentPage, pageCount)
+  const pageStart = (safeCurrentPage - 1) * pageSize
+  const pagedDetails = details.slice(pageStart, pageStart + pageSize)
+  const isLocked = executionBudget.approval_status === 'REQUESTED' || executionBudget.approval_status === 'APPROVED'
+
   return (
     <div>
       <div className="flex flex-col gap-4 border-b border-slate-200 pb-4 lg:flex-row lg:items-center lg:justify-between">
@@ -1535,10 +1665,14 @@ function ExecutionBudgetDetailPanel({
 
       <div className="py-5">
         <h3 className="mb-3 text-sm font-semibold text-slate-900">세부실행예산 입력 항목</h3>
+        <div className="mb-3 flex justify-end text-xs font-medium text-slate-500">
+          {details.length > 0 ? `${pageStart + 1}-${Math.min(pageStart + pageSize, details.length)} / ${details.length}` : '0 / 0'}
+        </div>
         <div className="overflow-x-auto">
-          <table className="min-w-[1560px] text-left text-sm">
+          <table className="min-w-[1640px] text-left text-sm">
             <thead className="bg-slate-50 text-xs font-semibold uppercase text-slate-500">
               <tr>
+                <th className="px-3 py-3">No</th>
                 <th className="px-3 py-3">프로젝트</th>
                 <th className="px-3 py-3">실행항목ID</th>
                 <th className="px-3 py-3">공종</th>
@@ -1555,8 +1689,11 @@ function ExecutionBudgetDetailPanel({
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100">
-              {details.map((detail, index) => (
+              {pagedDetails.map((detail, pageIndex) => {
+                const index = pageStart + pageIndex
+                return (
                 <tr key={detail.detail_id ?? index}>
+                  <td className="px-3 py-3 text-center font-semibold text-slate-500">{index + 1}</td>
                   <td className="px-3 py-3 text-slate-600">{executionBudget.project_code}</td>
                   <td className="px-3 py-3">
                     <input value={detail.budget_item_id} onChange={(event) => updateExecutionDetail(index, 'budget_item_id', event.target.value)} className="input" />
@@ -1604,15 +1741,44 @@ function ExecutionBudgetDetailPanel({
                     </div>
                   </td>
                 </tr>
-              ))}
+                )
+              })}
               <tr className="bg-slate-50 font-semibold text-slate-900">
-                <td className="px-3 py-3" colSpan={9}>합계</td>
+                <td className="px-3 py-3" colSpan={10}>합계</td>
                 <td className="px-3 py-3">{formatWon(totalAmount)}</td>
                 <td className="px-3 py-3" colSpan={3}></td>
               </tr>
             </tbody>
           </table>
         </div>
+        {pageCount > 1 && (
+          <div className="mt-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+            <p className="text-xs font-medium text-slate-500">10개씩 페이지 처리</p>
+            <div className="flex items-center gap-2">
+              <button
+                type="button"
+                onClick={() => setCurrentPage(Math.max(1, safeCurrentPage - 1))}
+                disabled={safeCurrentPage === 1}
+                className="inline-flex items-center gap-1 rounded-md border border-slate-300 px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-40"
+              >
+                <ArrowLeft className="h-4 w-4" aria-hidden="true" />
+                이전
+              </button>
+              <span className="min-w-16 text-center text-sm font-semibold text-slate-700">
+                {safeCurrentPage} / {pageCount}
+              </span>
+              <button
+                type="button"
+                onClick={() => setCurrentPage(Math.min(pageCount, safeCurrentPage + 1))}
+                disabled={safeCurrentPage === pageCount}
+                className="inline-flex items-center gap-1 rounded-md border border-slate-300 px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-40"
+              >
+                다음
+                <ArrowRight className="h-4 w-4" aria-hidden="true" />
+              </button>
+            </div>
+          </div>
+        )}
         <button
           type="button"
           onClick={() => addExecutionDetail()}

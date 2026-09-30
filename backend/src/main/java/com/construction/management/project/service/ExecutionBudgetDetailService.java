@@ -4,6 +4,7 @@ import com.construction.management.project.api.ExecutionBudgetDetailRequest;
 import com.construction.management.project.api.ExecutionBudgetDetailResponse;
 import com.construction.management.project.api.ExecutionBudgetDetailResponse.Detail;
 import com.construction.management.project.api.ExecutionBudgetDetailResponse.SummaryItem;
+import com.construction.management.project.domain.ApprovalStatus;
 import com.construction.management.project.domain.CustomerContractItem;
 import com.construction.management.project.domain.Project;
 import com.construction.management.project.domain.ProjectExecutionBudgetDetail;
@@ -58,8 +59,13 @@ public class ExecutionBudgetDetailService {
 	public ExecutionBudgetDetailResponse saveDetails(String projectId, ExecutionBudgetDetailRequest request) {
 		projectSettlementService.assertNotSettled(projectId);
 		Project project = getProject(projectId);
-		detailRepository.deleteByProjectId(projectId);
+		boolean locked = itemRepository.findByProjectIdOrderByItemIdAsc(projectId).stream()
+				.anyMatch(item -> ApprovalStatus.REQUESTED.name().equals(item.getApprovalStatus()) || ApprovalStatus.APPROVED.name().equals(item.getApprovalStatus()));
+		if (locked) {
+			throw new IllegalStateException("결재 대기 또는 승인 완료 상태의 실행예산은 수정할 수 없습니다.");
+		}
 
+		detailRepository.deleteByProjectId(projectId);
 		List<ProjectExecutionBudgetDetail> details = request.details().stream()
 				.filter(detail -> StringUtils.hasText(detail.budgetItemId()) && StringUtils.hasText(detail.categoryName()) && StringUtils.hasText(detail.itemName()))
 				.map(detail -> new ProjectExecutionBudgetDetail(
@@ -110,6 +116,13 @@ public class ExecutionBudgetDetailService {
 	private ExecutionBudgetDetailResponse toResponse(Project project) {
 		List<ProjectExecutionBudgetDetail> details = detailRepository.findByProjectIdOrderByBudgetItemIdAscDetailIdAsc(project.getProjectId());
 		List<ProjectExecutionBudgetItem> items = itemRepository.findByProjectIdOrderByItemIdAsc(project.getProjectId());
+		String approvalStatus = executionBudgetApprovalStatus(items);
+		String approvalId = items.stream().map(ProjectExecutionBudgetItem::getApprovalId).filter(StringUtils::hasText).findFirst().orElse(null);
+		String approvalComment = items.stream().map(ProjectExecutionBudgetItem::getApprovalComment).filter(StringUtils::hasText).findFirst().orElse(null);
+		BigDecimal approvedAmount = items.stream()
+				.map(ProjectExecutionBudgetItem::getApprovedBudgetAmount)
+				.map(ExecutionBudgetDetailService::defaultZero)
+				.reduce(BigDecimal.ZERO, BigDecimal::add);
 		BigDecimal totalDetailAmount = details.stream()
 				.map(ProjectExecutionBudgetDetail::getAmount)
 				.map(ExecutionBudgetDetailService::defaultZero)
@@ -128,7 +141,10 @@ public class ExecutionBudgetDetailService {
 				project.getProjectName(),
 				contractSupplyAmount,
 				targetCostLimit,
-				"작성중",
+				approvalStatus,
+				approvalId,
+				approvalComment,
+				approvedAmount,
 				totalDetailAmount,
 				targetCostLimit.compareTo(BigDecimal.ZERO) > 0 && totalDetailAmount.compareTo(targetCostLimit) > 0,
 				items.stream()
@@ -152,6 +168,22 @@ public class ExecutionBudgetDetailService {
 						))
 						.toList()
 		);
+	}
+
+	private static String executionBudgetApprovalStatus(List<ProjectExecutionBudgetItem> items) {
+		if (items.isEmpty()) {
+			return ApprovalStatus.DRAFT.name();
+		}
+		if (items.stream().anyMatch(item -> ApprovalStatus.REQUESTED.name().equals(item.getApprovalStatus()))) {
+			return ApprovalStatus.REQUESTED.name();
+		}
+		if (items.stream().allMatch(ProjectExecutionBudgetItem::isApproved)) {
+			return ApprovalStatus.APPROVED.name();
+		}
+		if (items.stream().anyMatch(item -> ApprovalStatus.REJECTED.name().equals(item.getApprovalStatus()))) {
+			return ApprovalStatus.REJECTED.name();
+		}
+		return ApprovalStatus.DRAFT.name();
 	}
 
 	private Project getProject(String projectId) {

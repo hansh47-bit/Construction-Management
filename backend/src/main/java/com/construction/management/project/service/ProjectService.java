@@ -201,7 +201,8 @@ public class ProjectService {
 						.map(budget -> currentBudgetAmount(budget, budgetChangesByBudget))
 						.reduce(BigDecimal.ZERO, BigDecimal::add)
 				: rolledUpExecutionBudgetItems.stream()
-						.map(ProjectExecutionBudgetItem::getBudgetAmount)
+						.filter(ProjectExecutionBudgetItem::isApproved)
+						.map(ProjectExecutionBudgetItem::getApprovedBudgetAmount)
 						.map(ProjectService::defaultZero)
 						.reduce(BigDecimal.ZERO, BigDecimal::add);
 		BigDecimal currentPurchaseAmount = purchaseOrders.stream()
@@ -220,10 +221,17 @@ public class ProjectService {
 				.map(PurchaseOrder::getBudgetId)
 				.filter(StringUtils::hasText)
 				.collect(Collectors.toSet());
-		BigDecimal unpurchasedBudgetAmount = budgets.stream()
-				.filter(budget -> !purchasedBudgetIds.contains(budget.getBudgetId()))
-				.map(budget -> currentBudgetAmount(budget, budgetChangesByBudget))
-				.reduce(BigDecimal.ZERO, BigDecimal::add);
+		BigDecimal unpurchasedBudgetAmount = rolledUpExecutionBudgetItems.isEmpty()
+				? budgets.stream()
+						.filter(budget -> !purchasedBudgetIds.contains(budget.getBudgetId()))
+						.map(budget -> currentBudgetAmount(budget, budgetChangesByBudget))
+						.reduce(BigDecimal.ZERO, BigDecimal::add)
+				: rolledUpExecutionBudgetItems.stream()
+						.filter(ProjectExecutionBudgetItem::isApproved)
+						.filter(item -> !purchasedBudgetIds.contains(item.getItemId()))
+						.map(ProjectExecutionBudgetItem::getApprovedBudgetAmount)
+						.map(ProjectService::defaultZero)
+						.reduce(BigDecimal.ZERO, BigDecimal::add);
 
 		BigDecimal expectedFinalCost = currentPurchaseAmount.add(unpurchasedBudgetAmount);
 		BigDecimal expectedProfit = currentContractAmount.subtract(expectedFinalCost);

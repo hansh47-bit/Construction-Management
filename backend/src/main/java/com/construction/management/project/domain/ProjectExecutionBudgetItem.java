@@ -29,6 +29,21 @@ public class ProjectExecutionBudgetItem {
 	@Column(name = "budget_amount", nullable = false, precision = 18, scale = 2)
 	private BigDecimal budgetAmount = BigDecimal.ZERO;
 
+	@Column(name = "approval_status", nullable = false)
+	private String approvalStatus = ApprovalStatus.DRAFT.name();
+
+	@Column(name = "approved_budget_amount", precision = 18, scale = 2)
+	private BigDecimal approvedBudgetAmount;
+
+	@Column(name = "approved_at")
+	private LocalDateTime approvedAt;
+
+	@Column(name = "approval_id", length = 64)
+	private String approvalId;
+
+	@Column(name = "approval_comment", length = 1000)
+	private String approvalComment;
+
 	@Column(name = "created_at", nullable = false, updatable = false)
 	private LocalDateTime createdAt;
 
@@ -77,6 +92,26 @@ public class ProjectExecutionBudgetItem {
 		return budgetAmount;
 	}
 
+	public String getApprovalStatus() {
+		return approvalStatus;
+	}
+
+	public BigDecimal getApprovedBudgetAmount() {
+		return approvedBudgetAmount;
+	}
+
+	public LocalDateTime getApprovedAt() {
+		return approvedAt;
+	}
+
+	public String getApprovalId() {
+		return approvalId;
+	}
+
+	public String getApprovalComment() {
+		return approvalComment;
+	}
+
 	public void updateInfo(String categoryName, String itemName) {
 		this.categoryName = categoryName;
 		this.itemName = itemName;
@@ -84,5 +119,29 @@ public class ProjectExecutionBudgetItem {
 
 	public void updateBudgetAmount(BigDecimal budgetAmount) {
 		this.budgetAmount = budgetAmount == null ? BigDecimal.ZERO : budgetAmount;
+	}
+
+	public void markApprovalRequested(String approvalId) {
+		this.approvalStatus = ApprovalStatus.REQUESTED.name();
+		this.approvalId = approvalId;
+		this.approvalComment = null;
+	}
+
+	public void approve(String approvalId) {
+		this.approvalStatus = ApprovalStatus.APPROVED.name();
+		this.approvalId = approvalId;
+		this.approvedBudgetAmount = budgetAmount == null ? BigDecimal.ZERO : budgetAmount;
+		this.approvedAt = LocalDateTime.now();
+		this.approvalComment = null;
+	}
+
+	public void reject(String approvalId, String comment) {
+		this.approvalStatus = ApprovalStatus.REJECTED.name();
+		this.approvalId = approvalId;
+		this.approvalComment = comment;
+	}
+
+	public boolean isApproved() {
+		return ApprovalStatus.APPROVED.name().equals(approvalStatus);
 	}
 }
