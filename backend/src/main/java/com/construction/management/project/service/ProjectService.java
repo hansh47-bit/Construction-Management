@@ -34,12 +34,13 @@ import jakarta.persistence.EntityNotFoundException;
 import java.math.BigDecimal;
 import java.math.RoundingMode;
 import java.text.Normalizer;
-import java.time.Year;
+import java.time.LocalDate;
+import java.time.ZoneId;
+import java.time.format.DateTimeFormatter;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
-import java.util.UUID;
 import java.util.function.Function;
 import java.util.stream.Collectors;
 import org.springframework.stereotype.Service;
@@ -48,6 +49,9 @@ import org.springframework.util.StringUtils;
 
 @Service
 public class ProjectService {
+
+	private static final ZoneId KOREA_ZONE_ID = ZoneId.of("Asia/Seoul");
+	private static final DateTimeFormatter PROJECT_CODE_DATE_FORMAT = DateTimeFormatter.BASIC_ISO_DATE;
 
 	private final ProjectRepository projectRepository;
 	private final ProjectContractRepository projectContractRepository;
@@ -89,10 +93,7 @@ public class ProjectService {
 
 	@Transactional
 	public ProjectResponse create(ProjectCreateRequest request) {
-		String projectCode = StringUtils.hasText(request.projectCode()) ? request.projectCode() : nextProjectCode();
-		if (projectRepository.existsByProjectCode(projectCode)) {
-			throw new IllegalArgumentException("이미 등록된 프로젝트번호입니다: " + projectCode);
-		}
+		String projectCode = nextProjectCode();
 
 		Project project = new Project(toProjectId(projectCode), projectCode, request.projectName())
 				.updateDetails(
@@ -103,7 +104,7 @@ public class ProjectService {
 						request.endDate(),
 						request.teamLeaderId(),
 						request.managerId(),
-						request.status(),
+						ProjectStatus.견적,
 						request.targetProfitRate(),
 						request.note()
 				);
@@ -137,18 +138,20 @@ public class ProjectService {
 				.orElseThrow(() -> new EntityNotFoundException("프로젝트를 찾을 수 없습니다: " + projectId));
 
 		List<CustomerContractItem> customerContractItems = customerContractItemRepository.findByProjectIdOrderByWorkCategoryAsc(projectId);
+		BigDecimal approvedContractChangeAmount = contractChangeRepository.findByProjectIdAndApprovalStatus(projectId, ApprovalStatus.APPROVED).stream()
+				.map(ContractChange::getChangeAmount)
+				.map(ProjectService::defaultZero)
+				.reduce(BigDecimal.ZERO, BigDecimal::add);
 		BigDecimal currentContractAmount = customerContractItems.isEmpty()
 				? projectContractRepository.findByProjectId(projectId).stream()
 						.map(contract -> defaultZero(contract.getInitialAmount()))
 						.reduce(BigDecimal.ZERO, BigDecimal::add)
-						.add(contractChangeRepository.findByProjectIdAndApprovalStatus(projectId, ApprovalStatus.APPROVED).stream()
-								.map(ContractChange::getChangeAmount)
-								.map(ProjectService::defaultZero)
-								.reduce(BigDecimal.ZERO, BigDecimal::add))
+						.add(approvedContractChangeAmount)
 				: customerContractItems.stream()
 						.map(CustomerContractItem::getContractAmount)
 						.map(ProjectService::defaultZero)
-						.reduce(BigDecimal.ZERO, BigDecimal::add);
+						.reduce(BigDecimal.ZERO, BigDecimal::add)
+						.add(approvedContractChangeAmount);
 
 		List<ExecutionBudget> budgets = executionBudgetRepository.findByProjectId(projectId);
 		List<String> budgetIds = budgets.stream().map(ExecutionBudget::getBudgetId).toList();
@@ -196,14 +199,16 @@ public class ProjectService {
 				));
 
 		List<ProjectExecutionBudgetItem> rolledUpExecutionBudgetItems = projectExecutionBudgetItemRepository.findByProjectIdOrderByItemIdAsc(projectId);
+		List<String> rolledUpBudgetIds = rolledUpExecutionBudgetItems.stream().map(ProjectExecutionBudgetItem::getItemId).toList();
+		Map<String, BigDecimal> rolledUpBudgetChanges = rolledUpBudgetIds.isEmpty() ? Map.of() : budgetChangeRepository.findByBudgetIdInAndApprovalStatus(rolledUpBudgetIds, ApprovalStatus.APPROVED).stream()
+				.collect(Collectors.groupingBy(BudgetChange::getBudgetId, Collectors.mapping(change -> defaultZero(change.getChangeAmount()), Collectors.reducing(BigDecimal.ZERO, BigDecimal::add))));
 		BigDecimal currentExecutionBudget = rolledUpExecutionBudgetItems.isEmpty()
 				? budgets.stream()
 						.map(budget -> currentBudgetAmount(budget, budgetChangesByBudget))
 						.reduce(BigDecimal.ZERO, BigDecimal::add)
 				: rolledUpExecutionBudgetItems.stream()
 						.filter(ProjectExecutionBudgetItem::isApproved)
-						.map(ProjectExecutionBudgetItem::getApprovedBudgetAmount)
-						.map(ProjectService::defaultZero)
+						.map(item -> defaultZero(item.getApprovedBudgetAmount()).add(rolledUpBudgetChanges.getOrDefault(item.getItemId(), BigDecimal.ZERO)))
 						.reduce(BigDecimal.ZERO, BigDecimal::add);
 		BigDecimal currentPurchaseAmount = purchaseOrders.stream()
 				.map(po -> currentPoAmount(po, poChangesByPo))
@@ -229,8 +234,7 @@ public class ProjectService {
 				: rolledUpExecutionBudgetItems.stream()
 						.filter(ProjectExecutionBudgetItem::isApproved)
 						.filter(item -> !purchasedBudgetIds.contains(item.getItemId()))
-						.map(ProjectExecutionBudgetItem::getApprovedBudgetAmount)
-						.map(ProjectService::defaultZero)
+						.map(item -> defaultZero(item.getApprovedBudgetAmount()).add(rolledUpBudgetChanges.getOrDefault(item.getItemId(), BigDecimal.ZERO)))
 						.reduce(BigDecimal.ZERO, BigDecimal::add);
 
 		BigDecimal expectedFinalCost = currentPurchaseAmount.add(unpurchasedBudgetAmount);
@@ -304,7 +308,20 @@ public class ProjectService {
 	}
 
 	private String nextProjectCode() {
-		return "P-" + Year.now().getValue() + "-" + UUID.randomUUID().toString().substring(0, 8).toUpperCase(Locale.ROOT);
+		String prefix = "P-" + LocalDate.now(KOREA_ZONE_ID).format(PROJECT_CODE_DATE_FORMAT) + "-";
+		int nextSequence = projectRepository.findByProjectCodeStartingWithOrderByProjectCodeDesc(prefix).stream()
+				.map(Project::getProjectCode)
+				.map(code -> code.substring(prefix.length()))
+				.mapToInt(sequence -> {
+					try {
+						return Integer.parseInt(sequence);
+					} catch (NumberFormatException ignored) {
+						return 0;
+					}
+				})
+				.max()
+				.orElse(0) + 1;
+		return "%s%03d".formatted(prefix, nextSequence);
 	}
 
 	private String toProjectId(String projectCode) {

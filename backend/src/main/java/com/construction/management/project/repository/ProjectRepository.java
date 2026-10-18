@@ -7,6 +7,8 @@ import org.springframework.data.jpa.repository.JpaRepository;
 public interface ProjectRepository extends JpaRepository<Project, String> {
 	boolean existsByProjectCode(String projectCode);
 
+	List<Project> findByProjectCodeStartingWithOrderByProjectCodeDesc(String projectCodePrefix);
+
 	List<Project> findTop20ByProjectNameContainingIgnoreCaseOrProjectCodeContainingIgnoreCaseOrderByCreatedAtDesc(
 			String projectName,
 			String projectCode

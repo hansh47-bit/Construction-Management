@@ -47,4 +47,8 @@ public class BudgetChange {
 	public String getBudgetId() {
 		return budgetId;
 	}
+
+	public String getChangeId() { return changeId; }
+	public String getChangeCode() { return changeCode; }
+	public ApprovalStatus getApprovalStatus() { return approvalStatus; }
 }

@@ -2,6 +2,7 @@ package com.construction.management.project.api;
 
 import com.fasterxml.jackson.annotation.JsonProperty;
 import java.math.BigDecimal;
+import java.time.LocalDateTime;
 
 public record PurchaseOrderDraftResponse(
 		@JsonProperty("project_code") String projectCode,
@@ -15,6 +16,9 @@ public record PurchaseOrderDraftResponse(
 		@JsonProperty("variance_type") String varianceType,
 		@JsonProperty("display_color") String displayColor,
 		@JsonProperty("selection_reason") String selectionReason,
-		@JsonProperty("approval_status") String approvalStatus
+		@JsonProperty("approval_status") String approvalStatus,
+		@JsonProperty("po_id") String poId,
+		@JsonProperty("approved_at") LocalDateTime approvedAt,
+		String approver
 ) {
 }

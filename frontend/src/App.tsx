@@ -99,8 +99,10 @@ type CustomerContract = {
   client_name?: string
   target_profit_rate: number
   total_contract_supply_amount: number
+  current_contract_supply_amount: number
   total_vat_amount: number
   total_contract_with_vat: number
+  current_contract_with_vat: number
   target_cost_limit: number
   items: CustomerContractItem[]
   files: ContractFile[]
@@ -182,6 +184,56 @@ type PurchaseOrderDraft = {
   display_color: string
   selection_reason: string
   approval_status: string
+  po_id?: string
+  approved_at?: string
+  approver?: string
+}
+
+type ChangeOrderImpact = { category: string; target_id: string; label: string; delta_amount: number }
+type ChangeOrder = {
+  change_order_id: string
+  project_id: string
+  title: string
+  reason: string
+  requested_by: string
+  status: string
+  created_at: string
+  contract_delta_amount: number
+  budget_delta_amount: number
+  purchase_order_delta_amount: number
+  impacts: ChangeOrderImpact[]
+}
+
+type PurchaseOrderHistoryItem = {
+  po_id: string
+  requisition_id?: string
+  approval_id?: string
+  selected_comparison_id?: string
+  execution_item_id: string
+  work_category: string
+  execution_item_name: string
+  vendor_name: string
+  initial_po_amount: number
+  current_po_amount: number
+  approved_execution_budget: number
+  budget_variance: number
+  selection_reason?: string
+  construction_period?: string
+  scope_and_notes?: string
+  payment_terms?: string
+  estimate_file_url?: string
+  approved_at?: string
+  approver?: string
+  approval_comment?: string
+  approved_claim_total: number
+  actual_paid_total: number
+  total_unpaid_balance: number
+}
+
+type PurchaseOrderHistoryResponse = {
+  project_id: string
+  project_code: string
+  items: PurchaseOrderHistoryItem[]
 }
 
 type ApprovalItem = {
@@ -234,12 +286,15 @@ type PurchaseOrderPaymentStatus = {
   unclaimed_amount: number
   approved_unpaid_amount: number
   total_unpaid_balance: number
+  payment_request_status: string
   claims: ClaimStatus[]
 }
 
 type ProgressPaymentResponse = {
   project_id: string
   project_code: string
+  all_payments_approved: boolean
+  pending_payment_approval_count: number
   purchaseOrders: PurchaseOrderPaymentStatus[]
 }
 
@@ -277,7 +332,6 @@ type ProjectSettlement = {
 }
 
 type ProjectForm = {
-  project_code: string
   project_name: string
   client_name: string
   site_address: string
@@ -286,18 +340,16 @@ type ProjectForm = {
   end_date: string
   team_leader_id: string
   manager_id: string
-  status: string
   target_profit_rate: string
   note: string
 }
 
-const statuses = ['견적', '계약', '공사준비', '공사진행', '준공', '정산중', '정산완료', '보류']
-const tabs = ['고객 견적·계약 관리', '세부실행예산', '업체 비교견적', '통합결재함', '공종별 흐름 추적', '계약/발주/변경이력', '기성 및 지급 현황', '준공정산', '증빙 및 파일']
+const tabs = ['고객 견적·계약 관리', '세부실행예산', '업체 비교견적', '통합결재함', '공종별 흐름 추적', '계약/발주 이력', '기성 및 지급 현황', '준공정산', '증빙 및 파일']
+const projectTabs = tabs.filter((tab) => tab !== '통합결재함')
 const costTypes = ['외주비', '폐기물', '인건비', '장비비', '운반비', '자재비', '현장경비']
 const vatTypes = ['별도', '포함', '면세']
 
 const initialForm: ProjectForm = {
-  project_code: '',
   project_name: '',
   client_name: '',
   site_address: '',
@@ -306,7 +358,6 @@ const initialForm: ProjectForm = {
   end_date: '',
   team_leader_id: '',
   manager_id: '',
-  status: '견적',
   target_profit_rate: '0',
   note: '',
 }
@@ -374,6 +425,7 @@ function newVendorComparison(itemId = 'EX-001', suffix = 'A'): VendorComparisonI
 }
 
 function App() {
+  const [activePage, setActivePage] = useState<'projects' | 'approvals' | 'changes'>('projects')
   const [projects, setProjects] = useState<Project[]>([])
   const [keyword, setKeyword] = useState('')
   const [selectedProjectId, setSelectedProjectId] = useState<string | null>(null)
@@ -386,6 +438,8 @@ function App() {
   const [vendorComparison, setVendorComparison] = useState<VendorComparisonResponse | null>(null)
   const [vendorComparisons, setVendorComparisons] = useState<VendorComparisonItem[]>([])
   const [purchaseOrderDraft, setPurchaseOrderDraft] = useState<PurchaseOrderDraft | null>(null)
+  const [purchaseOrderHistory, setPurchaseOrderHistory] = useState<PurchaseOrderHistoryItem[]>([])
+  const [changeOrders, setChangeOrders] = useState<ChangeOrder[]>([])
   const [approvals, setApprovals] = useState<ApprovalItem[]>([])
   const [selectedApproval, setSelectedApproval] = useState<ApprovalItem | null>(null)
   const [approvalStatusFilter, setApprovalStatusFilter] = useState('REQUESTED')
@@ -395,7 +449,7 @@ function App() {
   const [settlement, setSettlement] = useState<ProjectSettlement | null>(null)
   const [selectedPoId, setSelectedPoId] = useState('')
   const [claimForm, setClaimForm] = useState({ degree: '1', claim_amount: '0' })
-  const [paymentForms, setPaymentForms] = useState<Record<string, { paid_amount: string; paid_date: string; account_info: string; receipt_link: string }>>({})
+  const [selectedPaymentPoIds, setSelectedPaymentPoIds] = useState<string[]>([])
   const [settlementForm, setSettlementForm] = useState({ uncollected_receivable: '0', settlement_notes: '', force_complete_if_unpaid: false, unpaid_handling_reason: '' })
   const [targetProfitRate, setTargetProfitRate] = useState('0')
   const [selectedFileType, setSelectedFileType] = useState('CONTRACT')
@@ -425,9 +479,12 @@ function App() {
       setVendorComparison(null)
       setVendorComparisons([])
       setPurchaseOrderDraft(null)
+      setPurchaseOrderHistory([])
+      setChangeOrders([])
       setApprovals([])
       setSelectedApproval(null)
       setProgressPayment(null)
+      setSelectedPaymentPoIds([])
       setSettlement(null)
       setSelectedPoId('')
       return
@@ -474,15 +531,17 @@ function App() {
     loadExecutionBudgetDetails(selectedProjectId)
     loadApprovals()
     loadProgressPayments(selectedProjectId)
+    loadPurchaseOrders(selectedProjectId)
+    loadChangeOrders(selectedProjectId)
     loadSettlement(selectedProjectId)
   }, [selectedProjectId])
 
   useEffect(() => {
-    if (!selectedProjectId) {
+    if (!selectedProjectId && activePage !== 'approvals') {
       return
     }
     loadApprovals()
-  }, [approvalStatusFilter, approvalTypeFilter])
+  }, [approvalStatusFilter, approvalTypeFilter, activePage, selectedProjectId])
 
   const selectedProject = useMemo(
     () => projects.find((project) => project.project_id === selectedProjectId) ?? summary?.project_info,
@@ -509,7 +568,6 @@ function App() {
     event.preventDefault()
     const payload = {
       ...form,
-      project_code: form.project_code.trim() || undefined,
       target_profit_rate: Number(form.target_profit_rate || 0),
     }
 
@@ -667,6 +725,51 @@ function App() {
     await loadSettlement(selectedProjectId)
   }
 
+  async function correctAmountByExecutive() {
+    if (!selectedProjectId || !contract) return
+    const targetText = window.prompt('변경할 계약 공급가액을 입력하세요. 변경 금액은 즉시 반영되며 원본은 유지됩니다.', String(contract.current_contract_supply_amount ?? contract.total_contract_supply_amount))
+    if (targetText === null) return
+    const targetAmount = Number(targetText.replaceAll(',', '').trim())
+    if (!Number.isFinite(targetAmount) || targetAmount < 0) {
+      setError('계약 공급가액을 0 이상의 숫자로 입력하세요.')
+      return
+    }
+    const reason = window.prompt('변경 사유를 입력하세요.')
+    if (!reason?.trim()) return
+    const response = await fetch(apiUrl(`/api/v1/projects/${selectedProjectId}/change-orders/executive-correction`), {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        target_contract_supply_amount: targetAmount,
+        reason: reason.trim(),
+        apply_execution_budget: true,
+        apply_purchase_orders: true,
+      }),
+    })
+    if (!response.ok) {
+      const message = await response.text()
+      setError(message || `대표 금액 정정 실패: ${response.status}`)
+      return
+    }
+    await Promise.all([
+      loadCustomerContract(selectedProjectId),
+      loadExecutionBudgetDetails(selectedProjectId),
+      loadPurchaseOrders(selectedProjectId),
+      loadChangeOrders(selectedProjectId),
+      loadProgressPayments(selectedProjectId),
+      loadSettlement(selectedProjectId),
+      loadProjects(keyword),
+    ])
+    const summaryResponse = await fetch(apiUrl(`/api/v1/projects/${selectedProjectId}/integrated-summary`))
+    if (summaryResponse.ok) setSummary(await summaryResponse.json())
+    setError(null)
+  }
+
+  async function loadChangeOrders(projectId: string) {
+    const response = await fetch(apiUrl(`/api/v1/projects/${projectId}/change-orders`))
+    if (response.ok) setChangeOrders(await response.json())
+  }
+
   async function requestExecutionBudgetApproval() {
     if (!selectedProjectId) return
     const response = await fetch(apiUrl(`/api/v1/projects/${selectedProjectId}/execution-budget-details/request-approval`), {
@@ -684,9 +787,9 @@ function App() {
   }
 
   async function loadApprovals() {
-    if (!selectedProjectId) return
+    if (!selectedProjectId && activePage !== 'approvals') return
     const params = new URLSearchParams()
-    params.set('projectId', selectedProjectId)
+    if (selectedProjectId && activePage !== 'approvals') params.set('projectId', selectedProjectId)
     if (approvalStatusFilter) params.set('status', approvalStatusFilter)
     if (approvalTypeFilter) params.set('type', approvalTypeFilter)
     const response = await fetch(apiUrl(`/api/v1/approvals?${params.toString()}`))
@@ -719,15 +822,29 @@ function App() {
       return
     }
     setRejectComment('')
-    setSelectedApproval(await response.json())
+    const decidedApproval: ApprovalItem = await response.json()
+    setSelectedApproval(decidedApproval)
     await loadApprovals()
     if (selectedProjectId) {
       await loadExecutionBudgetDetails(selectedProjectId)
       if (selectedExecutionItemId) await loadVendorComparisons(selectedProjectId, selectedExecutionItemId)
       const summaryResponse = await fetch(apiUrl(`/api/v1/projects/${selectedProjectId}/integrated-summary`))
       if (summaryResponse.ok) setSummary(await summaryResponse.json())
-      await loadProgressPayments(selectedProjectId)
+      const progress = await loadProgressPayments(selectedProjectId)
+      await loadPurchaseOrders(selectedProjectId)
       await loadSettlement(selectedProjectId)
+      if (decision === 'approve' && decidedApproval.approval_type === 'PAYMENT' && decidedApproval.project_id === selectedProjectId && progress?.all_payments_approved) {
+        setActivePage('projects')
+        moveToTab('준공정산')
+      }
+    }
+    if (decision === 'approve' && decidedApproval.approval_type === 'PAYMENT' && decidedApproval.project_id !== selectedProjectId) {
+      const paymentProjectProgress = await loadProgressPayments(decidedApproval.project_id)
+      if (paymentProjectProgress?.all_payments_approved) {
+        setSelectedProjectId(decidedApproval.project_id)
+        setActivePage('projects')
+        moveToTab('준공정산')
+      }
     }
   }
 
@@ -783,6 +900,16 @@ function App() {
     }
     setPurchaseOrderDraft(await response.json())
     await loadSettlement(projectId)
+  }
+
+  async function loadPurchaseOrders(projectId: string) {
+    const response = await fetch(apiUrl(`/api/v1/projects/${projectId}/purchase-orders`))
+    if (!response.ok) {
+      setError(`발주 이력 조회 실패: ${response.status}`)
+      return
+    }
+    const data: PurchaseOrderHistoryResponse = await response.json()
+    setPurchaseOrderHistory(data.items)
   }
 
   async function saveVendorComparisons() {
@@ -850,7 +977,7 @@ function App() {
     setVendorComparisons((items) => items.filter((_, itemIndex) => itemIndex !== index))
   }
 
-  async function loadProgressPayments(projectId: string) {
+  async function loadProgressPayments(projectId: string): Promise<ProgressPaymentResponse | null> {
     try {
       const response = await fetch(apiUrl(`/api/v1/projects/${projectId}/progress-payments`))
       if (!response.ok) throw new Error(`기성/지급 현황 조회 실패: ${response.status}`)
@@ -860,8 +987,10 @@ function App() {
         setSelectedPoId(data.purchaseOrders[0].po_id)
       }
       setError(null)
+      return data
     } catch (err) {
       setError(err instanceof Error ? err.message : '기성/지급 현황을 불러오지 못했습니다.')
+      return null
     }
   }
 
@@ -937,26 +1066,20 @@ function App() {
     await loadSettlement(selectedProjectId)
   }
 
-  async function createPayment(claimId: string) {
-    if (!selectedProjectId) return
-    const form = paymentForms[claimId]
-    const response = await fetch(apiUrl(`/api/v1/projects/${selectedProjectId}/progress-claims/${claimId}/payments`), {
+  async function requestPaymentApprovals() {
+    if (!selectedProjectId || selectedPaymentPoIds.length === 0) return
+    const response = await fetch(apiUrl(`/api/v1/projects/${selectedProjectId}/payment-requests`), {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        paid_amount: toNumber(form?.paid_amount ?? '0'),
-        paid_date: form?.paid_date,
-        account_info: form?.account_info ?? '',
-        receipt_link: form?.receipt_link ?? '',
-      }),
+      body: JSON.stringify({ po_ids: selectedPaymentPoIds }),
     })
     if (!response.ok) {
-      setError(`지급 처리 실패: ${response.status}`)
+      setError(`지급요청 실패: ${response.status}`)
       return
     }
-    setProgressPayment(await response.json())
-    setPaymentForms((forms) => ({ ...forms, [claimId]: { paid_amount: '0', paid_date: '', account_info: '', receipt_link: '' } }))
-    await loadSettlement(selectedProjectId)
+    setSelectedPaymentPoIds([])
+    await loadProgressPayments(selectedProjectId)
+    await loadApprovals()
   }
 
   function updateContractItem(index: number, field: keyof CustomerContractItem, value: string) {
@@ -994,9 +1117,9 @@ function App() {
 
   const flowCards = summary
     ? [
-        ['현재 계약금액', summary.flow_summary.current_contract_amount, '계약/발주/변경이력'],
+        ['현재 계약금액', summary.flow_summary.current_contract_amount, '계약/발주 이력'],
         ['현재 실행예산', summary.flow_summary.current_execution_budget, '공종별 흐름 추적'],
-        ['현재 발주금액', summary.flow_summary.current_purchase_amount, '계약/발주/변경이력'],
+        ['현재 발주금액', summary.flow_summary.current_purchase_amount, '계약/발주 이력'],
         ['누적 기성금액', summary.flow_summary.accumulated_completed_amount, '기성 및 지급 현황'],
         ['실제 지급금액', summary.flow_summary.actual_paid_amount, '기성 및 지급 현황'],
       ]
@@ -1043,20 +1166,49 @@ function App() {
           <div>
             <p className="text-sm font-semibold text-slate-500">Project Single View</p>
             <h1 className="mt-2 text-3xl font-semibold tracking-normal text-slate-950">
-              프로젝트 등록 및 통합현황
+              {activePage === 'projects' ? '프로젝트 등록 및 통합현황' : activePage === 'approvals' ? '통합결재함' : '변경관리 이력'}
             </h1>
             <p className="mt-2 max-w-3xl text-sm leading-6 text-slate-600">
-              프로젝트를 선택하면 계약, 실행예산, 발주, 기성, 지급, 예상손익을 하나의 흐름으로 추적합니다.
+              {activePage === 'projects'
+                ? '프로젝트를 선택하면 계약, 실행예산, 발주, 기성, 지급, 예상손익을 하나의 흐름으로 추적합니다.'
+                : activePage === 'approvals'
+                  ? '모든 프로젝트의 실행예산 및 발주품의 결재를 한 곳에서 처리합니다.'
+                  : '선택한 프로젝트의 금액 변경 이력과 연결 영향을 확인합니다.'}
             </p>
+            <div className="mt-4 flex flex-wrap gap-2">
+              <button
+                type="button"
+                onClick={() => setActivePage('projects')}
+                className={`rounded-md px-3 py-2 text-sm font-semibold ${activePage === 'projects' ? 'bg-slate-900 text-white' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'}`}
+              >
+                프로젝트 현황
+              </button>
+              <button
+                type="button"
+                onClick={() => setActivePage('approvals')}
+                className={`rounded-md px-3 py-2 text-sm font-semibold ${activePage === 'approvals' ? 'bg-slate-900 text-white' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'}`}
+              >
+                통합결재함
+              </button>
+              <button
+                type="button"
+                onClick={() => setActivePage('changes')}
+                className={`rounded-md px-3 py-2 text-sm font-semibold ${activePage === 'changes' ? 'bg-slate-900 text-white' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'}`}
+              >
+                변경관리 이력
+              </button>
+            </div>
           </div>
-          <button
-            type="button"
-            onClick={() => setIsModalOpen(true)}
-            className="inline-flex items-center justify-center gap-2 rounded-md bg-cyan-700 px-4 py-2.5 text-sm font-semibold text-white shadow-sm hover:bg-cyan-800"
-          >
-            <FolderPlus className="h-4 w-4" aria-hidden="true" />
-            프로젝트 등록
-          </button>
+          {activePage === 'projects' && (
+            <button
+              type="button"
+              onClick={() => setIsModalOpen(true)}
+              className="inline-flex items-center justify-center gap-2 rounded-md bg-cyan-700 px-4 py-2.5 text-sm font-semibold text-white shadow-sm hover:bg-cyan-800"
+            >
+              <FolderPlus className="h-4 w-4" aria-hidden="true" />
+              프로젝트 등록
+            </button>
+          )}
         </header>
 
         {error && (
@@ -1066,6 +1218,8 @@ function App() {
           </section>
         )}
 
+        {activePage === 'projects' && (
+          <>
         {!selectedProjectId ? (
           <ProjectList
             projects={projects}
@@ -1157,7 +1311,7 @@ function App() {
 
             <section ref={tabRef} className="rounded-md border border-slate-200 bg-white shadow-sm">
               <div className="flex flex-wrap gap-2 border-b border-slate-200 px-4 py-3">
-                {tabs.map((tab) => (
+                {projectTabs.map((tab) => (
                   <button
                     key={tab}
                     type="button"
@@ -1181,6 +1335,7 @@ function App() {
                     setTargetProfitRate={setTargetProfitRate}
                     setSelectedFileType={setSelectedFileType}
                     saveCustomerContract={saveCustomerContract}
+                    correctAmountByExecutive={correctAmountByExecutive}
                     uploadContractFile={uploadContractFile}
                     updateContractItem={updateContractItem}
                     addContractItem={addContractItem}
@@ -1213,22 +1368,11 @@ function App() {
                     updateVendorComparison={updateVendorComparison}
                     addVendorComparison={addVendorComparison}
                     removeVendorComparison={removeVendorComparison}
+                    openPurchaseOrderHistory={() => moveToTab('계약/발주 이력')}
                   />
                 )}
-                {activeTab === '통합결재함' && (
-                  <ApprovalInboxPanel
-                    approvals={approvals}
-                    selectedApproval={selectedApproval}
-                    statusFilter={approvalStatusFilter}
-                    typeFilter={approvalTypeFilter}
-                    rejectComment={rejectComment}
-                    setStatusFilter={setApprovalStatusFilter}
-                    setTypeFilter={setApprovalTypeFilter}
-                    setRejectComment={setRejectComment}
-                    loadApprovalDetail={loadApprovalDetail}
-                    approveApproval={(approvalId) => decideApproval(approvalId, 'approve')}
-                    rejectApproval={(approvalId) => decideApproval(approvalId, 'reject')}
-                  />
+                {activeTab === '계약/발주 이력' && (
+                  <PurchaseOrderHistoryPanel purchaseOrders={purchaseOrderHistory} />
                 )}
                 {activeTab === '기성 및 지급 현황' && progressPayment && (
                   <ProgressPaymentPanel
@@ -1237,11 +1381,11 @@ function App() {
                     setSelectedPoId={setSelectedPoId}
                     claimForm={claimForm}
                     setClaimForm={setClaimForm}
-                    paymentForms={paymentForms}
-                    setPaymentForms={setPaymentForms}
+                    selectedPaymentPoIds={selectedPaymentPoIds}
+                    setSelectedPaymentPoIds={setSelectedPaymentPoIds}
                     createProgressClaim={createProgressClaim}
                     approveProgressClaim={approveProgressClaim}
-                    createPayment={createPayment}
+                    requestPaymentApprovals={requestPaymentApprovals}
                   />
                 )}
                 {activeTab === '준공정산' && settlement && (
@@ -1253,7 +1397,7 @@ function App() {
                   />
                 )}
                 {activeTab === '공종별 흐름 추적' && <CostBreakdownTable rows={summary.cost_breakdown} />}
-                {activeTab !== '고객 견적·계약 관리' && activeTab !== '세부실행예산' && activeTab !== '업체 비교견적' && activeTab !== '통합결재함' && activeTab !== '기성 및 지급 현황' && activeTab !== '준공정산' && activeTab !== '공종별 흐름 추적' && (
+                {activeTab !== '고객 견적·계약 관리' && activeTab !== '세부실행예산' && activeTab !== '업체 비교견적' && activeTab !== '계약/발주 이력' && activeTab !== '기성 및 지급 현황' && activeTab !== '준공정산' && activeTab !== '공종별 흐름 추적' && (
                   <div className="rounded-md border border-dashed border-slate-300 bg-slate-50 p-8 text-center text-sm text-slate-500">
                     {activeTab} 상세 목록은 다음 단계 API에서 확장 예정입니다. 현재 계산값은 상단 통합현황에 반영되어 있습니다.
                   </div>
@@ -1262,6 +1406,38 @@ function App() {
             </section>
           </>
         ) : null}
+          </>
+        )}
+
+        {activePage === 'approvals' && (
+          <section className="rounded-md border border-slate-200 bg-white p-4 shadow-sm">
+            <ApprovalInboxPanel
+              approvals={approvals}
+              selectedApproval={selectedApproval}
+              statusFilter={approvalStatusFilter}
+              typeFilter={approvalTypeFilter}
+              rejectComment={rejectComment}
+              setStatusFilter={setApprovalStatusFilter}
+              setTypeFilter={setApprovalTypeFilter}
+              setRejectComment={setRejectComment}
+              loadApprovalDetail={loadApprovalDetail}
+              approveApproval={(approvalId) => decideApproval(approvalId, 'approve')}
+              rejectApproval={(approvalId) => decideApproval(approvalId, 'reject')}
+            />
+          </section>
+        )}
+
+        {activePage === 'changes' && (
+          <section className="rounded-md border border-slate-200 bg-white p-4 shadow-sm">
+            {selectedProjectId ? (
+              <ChangeHistoryPanel changeOrders={changeOrders} />
+            ) : (
+              <div className="rounded-md border border-dashed border-slate-300 bg-slate-50 p-8 text-center text-sm text-slate-500">
+                프로젝트 현황에서 프로젝트를 선택하면 해당 프로젝트의 변경관리 이력을 조회할 수 있습니다.
+              </div>
+            )}
+          </section>
+        )}
       </div>
 
       {isModalOpen && (
@@ -1371,6 +1547,7 @@ function ContractManagementPanel({
   setTargetProfitRate,
   setSelectedFileType,
   saveCustomerContract,
+  correctAmountByExecutive,
   uploadContractFile,
   updateContractItem,
   addContractItem,
@@ -1384,6 +1561,7 @@ function ContractManagementPanel({
   setTargetProfitRate: (value: string) => void
   setSelectedFileType: (value: string) => void
   saveCustomerContract: () => void
+  correctAmountByExecutive: () => void
   uploadContractFile: (file: File | null) => void
   updateContractItem: (index: number, field: keyof CustomerContractItem, value: string) => void
   addContractItem: () => void
@@ -1396,14 +1574,23 @@ function ContractManagementPanel({
           <h3 className="text-lg font-semibold text-slate-950">고객 견적·계약 관리</h3>
           <p className="mt-1 text-sm text-slate-500">공급가액 기준 계약금액과 목표이익률로 목표원가한도를 계산합니다.</p>
         </div>
-        <button
-          type="button"
-          onClick={saveCustomerContract}
-          className="inline-flex items-center justify-center gap-2 rounded-md bg-slate-900 px-4 py-2 text-sm font-semibold text-white hover:bg-slate-800"
-        >
-          <Save className="h-4 w-4" aria-hidden="true" />
-          계약 저장
-        </button>
+        <div className="flex flex-wrap gap-2">
+          <button
+            type="button"
+            onClick={correctAmountByExecutive}
+            className="inline-flex items-center justify-center gap-2 rounded-md border border-amber-500 bg-amber-50 px-4 py-2 text-sm font-semibold text-amber-800 hover:bg-amber-100"
+          >
+            대표 금액 정정
+          </button>
+          <button
+            type="button"
+            onClick={saveCustomerContract}
+            className="inline-flex items-center justify-center gap-2 rounded-md bg-slate-900 px-4 py-2 text-sm font-semibold text-white hover:bg-slate-800"
+          >
+            <Save className="h-4 w-4" aria-hidden="true" />
+            계약 저장
+          </button>
+        </div>
       </div>
 
       <div className="grid gap-4 border-b border-slate-200 py-5 lg:grid-cols-[260px_1fr_1fr]">
@@ -1419,13 +1606,13 @@ function ContractManagementPanel({
         </label>
         <MetricPanel
           label="계약 총 공급가액"
-          value={formatWon(contractTotal.supply)}
-          helper={`VAT ${formatWon(contractTotal.vat)} · 계약금액 ${formatWon(contractTotal.total)}`}
+          value={formatWon(contract.current_contract_supply_amount ?? contractTotal.supply)}
+          helper={`최초 ${formatWon(contract.total_contract_supply_amount)} · VAT ${formatWon(contractTotal.vat)}`}
         />
         <MetricPanel
           label="목표원가한도"
-          value={formatWon(contractTotal.targetCostLimit)}
-          helper="계약 공급가액 × (1 - 목표이익률)"
+          value={formatWon(contract.target_cost_limit)}
+          helper="현재 계약 공급가액 × (1 - 목표이익률)"
           accent="text-cyan-700"
         />
       </div>
@@ -1593,6 +1780,7 @@ function ExecutionBudgetDetailPanel({
   const pageStart = (safeCurrentPage - 1) * pageSize
   const pagedDetails = details.slice(pageStart, pageStart + pageSize)
   const isLocked = executionBudget.approval_status === 'REQUESTED' || executionBudget.approval_status === 'APPROVED'
+  const displayedBudgetAmount = executionBudget.approval_status === 'APPROVED' ? (executionBudget.approved_amount ?? totalAmount) : totalAmount
 
   return (
     <div>
@@ -1604,7 +1792,8 @@ function ExecutionBudgetDetailPanel({
         <button
           type="button"
           onClick={saveExecutionBudgetDetails}
-          className="inline-flex items-center justify-center gap-2 rounded-md bg-slate-900 px-4 py-2 text-sm font-semibold text-white hover:bg-slate-800"
+          disabled={isLocked}
+          className="inline-flex items-center justify-center gap-2 rounded-md bg-slate-900 px-4 py-2 text-sm font-semibold text-white hover:bg-slate-800 disabled:cursor-not-allowed disabled:bg-slate-300"
         >
           <Save className="h-4 w-4" aria-hidden="true" />
           세부실행예산 저장
@@ -1617,13 +1806,13 @@ function ExecutionBudgetDetailPanel({
         <MetricPanel label="목표원가한도" value={formatWon(executionBudget.target_cost_limit)} helper="목표이익률 기준" />
         <MetricPanel
           label="세부실행예산 총합계"
-          value={formatWon(totalAmount)}
+          value={formatWon(displayedBudgetAmount)}
           helper={`결재상태 ${executionBudget.approval_status}`}
-          accent={executionBudget.over_target_limit || totalAmount > executionBudget.target_cost_limit ? 'text-rose-700' : 'text-cyan-700'}
+          accent={executionBudget.over_target_limit || displayedBudgetAmount > executionBudget.target_cost_limit ? 'text-rose-700' : 'text-cyan-700'}
         />
       </div>
 
-      {(executionBudget.over_target_limit || totalAmount > executionBudget.target_cost_limit) && executionBudget.target_cost_limit > 0 && (
+      {(executionBudget.over_target_limit || displayedBudgetAmount > executionBudget.target_cost_limit) && executionBudget.target_cost_limit > 0 && (
         <div className="mt-4 flex items-start gap-3 rounded-md border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-800">
           <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" aria-hidden="true" />
           <p>세부실행예산 총합계가 목표원가한도를 초과했습니다.</p>
@@ -1781,6 +1970,14 @@ function ExecutionBudgetDetailPanel({
         )}
         <button
           type="button"
+          onClick={requestExecutionBudgetApproval}
+          disabled={isLocked || details.length === 0 || totalAmount <= 0}
+          className="mt-4 mr-2 inline-flex items-center gap-2 rounded-md bg-cyan-700 px-3 py-2 text-sm font-semibold text-white hover:bg-cyan-800 disabled:cursor-not-allowed disabled:bg-slate-300"
+        >
+          결재요청
+        </button>
+        <button
+          type="button"
           onClick={() => addExecutionDetail()}
           className="mt-4 inline-flex items-center gap-2 rounded-md border border-slate-300 px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50"
         >
@@ -1798,24 +1995,28 @@ function ProgressPaymentPanel({
   setSelectedPoId,
   claimForm,
   setClaimForm,
-  paymentForms,
-  setPaymentForms,
+  selectedPaymentPoIds,
+  setSelectedPaymentPoIds,
   createProgressClaim,
   approveProgressClaim,
-  createPayment,
+  requestPaymentApprovals,
 }: {
   progressPayment: ProgressPaymentResponse
   selectedPoId: string
   setSelectedPoId: (value: string) => void
   claimForm: { degree: string; claim_amount: string }
   setClaimForm: (value: { degree: string; claim_amount: string }) => void
-  paymentForms: Record<string, { paid_amount: string; paid_date: string; account_info: string; receipt_link: string }>
-  setPaymentForms: (updater: (forms: Record<string, { paid_amount: string; paid_date: string; account_info: string; receipt_link: string }>) => Record<string, { paid_amount: string; paid_date: string; account_info: string; receipt_link: string }>) => void
+  selectedPaymentPoIds: string[]
+  setSelectedPaymentPoIds: (poIds: string[]) => void
   createProgressClaim: () => void
   approveProgressClaim: (claimId: string) => void
-  createPayment: (claimId: string) => void
+  requestPaymentApprovals: () => void
 }) {
   const selectedPo = progressPayment.purchaseOrders.find((po) => po.po_id === selectedPoId) ?? progressPayment.purchaseOrders[0]
+  const paymentRows = progressPayment.purchaseOrders.flatMap((po) => po.claims.map((claim) => ({ po, claim })))
+  const totalApprovedClaims = progressPayment.purchaseOrders.reduce((sum, po) => sum + po.approved_claim_total, 0)
+  const totalPaid = progressPayment.purchaseOrders.reduce((sum, po) => sum + po.actual_paid_total, 0)
+  const selectablePoIds = progressPayment.purchaseOrders.filter((po) => po.approved_unpaid_amount > 0 && po.payment_request_status !== 'REQUESTED').map((po) => po.po_id)
 
   if (!selectedPo) {
     return <div className="rounded-md border border-dashed border-slate-300 bg-slate-50 p-8 text-center text-sm text-slate-500">등록된 발주가 없습니다.</div>
@@ -1825,29 +2026,32 @@ function ProgressPaymentPanel({
     <div>
       <div className="flex flex-col gap-4 border-b border-slate-200 pb-4 lg:flex-row lg:items-center lg:justify-between">
         <div>
-          <h3 className="text-lg font-semibold text-slate-950">기성 관리 및 실제 지급 처리</h3>
-          <p className="mt-1 text-sm text-slate-500">기성 승인과 실제 지급을 분리하고 미기성/미지급 잔액을 구분합니다.</p>
+          <h3 className="text-lg font-semibold text-slate-950">기성 및 지급 현황</h3>
+          <p className="mt-1 text-sm text-slate-500">프로젝트 전체 업체의 기성·지급 현황을 확인하고, 선택 업체만 지급결재를 요청합니다.</p>
         </div>
-        <label className="block text-sm font-semibold text-slate-700 lg:w-80">
-          업체/발주 선택
-          <select value={selectedPo.po_id} onChange={(event) => setSelectedPoId(event.target.value)} className="input mt-2">
-            {progressPayment.purchaseOrders.map((po) => (
-              <option key={po.po_id} value={po.po_id}>{po.vendor_name} · {po.po_id}</option>
-            ))}
-          </select>
-        </label>
+        <button type="button" onClick={requestPaymentApprovals} disabled={selectedPaymentPoIds.length === 0} className="rounded-md bg-cyan-700 px-4 py-2 text-sm font-semibold text-white hover:bg-cyan-800 disabled:cursor-not-allowed disabled:bg-slate-300">선택 업체 지급요청 ({selectedPaymentPoIds.length})</button>
       </div>
 
       <div className="grid gap-3 border-b border-slate-200 py-5 md:grid-cols-3">
-        <MetricPanel label="현재 발주금액" value={formatWon(selectedPo.current_po_amount)} helper={selectedPo.vendor_name} />
-        <MetricPanel label="승인 기성누계" value={formatWon(selectedPo.approved_claim_total)} helper="대표 승인 완료 기준" />
-        <MetricPanel label="실제 지급누계" value={formatWon(selectedPo.actual_paid_total)} helper="송금 완료 처리 기준" />
-        <MetricPanel label="① 미기성 금액" value={formatWon(selectedPo.unclaimed_amount)} helper="아직 기성 청구 안 됨" />
-        <MetricPanel label="② 승인 후 미지급" value={formatWon(selectedPo.approved_unpaid_amount)} helper="지급 대기 중" accent={selectedPo.approved_unpaid_amount > 0 ? 'text-rose-700' : 'text-slate-950'} />
-        <MetricPanel label="③ 발주기준 총 미지급" value={formatWon(selectedPo.total_unpaid_balance)} helper="총 남아있는 잔액" accent={selectedPo.total_unpaid_balance > 0 ? 'text-cyan-700' : 'text-slate-950'} />
+        <MetricPanel label="발주 업체 수" value={`${progressPayment.purchaseOrders.length} 곳`} helper={`지급결재 대기 ${progressPayment.pending_payment_approval_count}건`} />
+        <MetricPanel label="승인 기성누계" value={formatWon(totalApprovedClaims)} helper="전체 업체 합계" />
+        <MetricPanel label="실제 지급누계" value={formatWon(totalPaid)} helper="지급결재 승인 반영" />
+        <MetricPanel label="전체 승인 후 미지급" value={formatWon(totalApprovedClaims - totalPaid)} helper="지급요청 가능 금액" accent={totalApprovedClaims > totalPaid ? 'text-rose-700' : 'text-slate-950'} />
+        <MetricPanel label="준공정산 이동 조건" value={progressPayment.all_payments_approved ? '충족' : '미충족'} helper="모든 정식 발주 지급 완료 기준" accent={progressPayment.all_payments_approved ? 'text-cyan-700' : 'text-slate-700'} />
       </div>
 
-      <div className="grid gap-3 border-b border-slate-200 py-5 md:grid-cols-[120px_1fr_auto]">
+      <div className="border-b border-slate-200 py-5">
+        <h3 className="mb-3 text-sm font-semibold text-slate-900">업체별 지급 대시보드</h3>
+        <div className="overflow-x-auto"><table className="min-w-[1150px] text-left text-sm"><thead className="bg-slate-50 text-xs font-semibold uppercase text-slate-500"><tr><th className="px-3 py-3"><input type="checkbox" checked={selectablePoIds.length > 0 && selectablePoIds.every((id) => selectedPaymentPoIds.includes(id))} onChange={(event) => setSelectedPaymentPoIds(event.target.checked ? selectablePoIds : [])} /></th><th className="px-3 py-3">업체</th><th className="px-3 py-3">발주번호</th><th className="px-3 py-3">현재 발주금액</th><th className="px-3 py-3">승인 기성</th><th className="px-3 py-3">지급누계</th><th className="px-3 py-3">승인 후 미지급</th><th className="px-3 py-3">지급결재 상태</th></tr></thead><tbody className="divide-y divide-slate-100">{progressPayment.purchaseOrders.map((po) => { const selectable = selectablePoIds.includes(po.po_id); return <tr key={po.po_id}><td className="px-3 py-3"><input type="checkbox" disabled={!selectable} checked={selectedPaymentPoIds.includes(po.po_id)} onChange={(event) => setSelectedPaymentPoIds(event.target.checked ? [...selectedPaymentPoIds, po.po_id] : selectedPaymentPoIds.filter((id) => id !== po.po_id))} /></td><td className="px-3 py-3 font-semibold text-slate-900">{po.vendor_name}</td><td className="px-3 py-3 text-cyan-800">{po.po_id}</td><td className="px-3 py-3">{formatWon(po.current_po_amount)}</td><td className="px-3 py-3">{formatWon(po.approved_claim_total)}</td><td className="px-3 py-3">{formatWon(po.actual_paid_total)}</td><td className="px-3 py-3 font-semibold">{formatWon(po.approved_unpaid_amount)}</td><td className="px-3 py-3">{po.payment_request_status}</td></tr> })}</tbody></table></div>
+      </div>
+
+      <div className="grid gap-3 border-b border-slate-200 py-5 md:grid-cols-[220px_120px_1fr_auto]">
+        <label className="block text-sm font-semibold text-slate-700">
+          기성 작성 대상
+          <select value={selectedPo.po_id} onChange={(event) => setSelectedPoId(event.target.value)} className="input mt-2">
+            {progressPayment.purchaseOrders.map((po) => <option key={po.po_id} value={po.po_id}>{po.vendor_name} · {po.po_id}</option>)}
+          </select>
+        </label>
         <label className="block text-sm font-semibold text-slate-700">
           차수
           <input value={claimForm.degree} onChange={(event) => setClaimForm({ ...claimForm, degree: event.target.value })} className="input mt-2" />
@@ -1862,29 +2066,28 @@ function ProgressPaymentPanel({
       </div>
 
       <div className="py-5">
-        <h3 className="mb-3 text-sm font-semibold text-slate-900">동적 차수 및 지급 내역</h3>
+        <h3 className="mb-3 text-sm font-semibold text-slate-900">전체 업체 기성 및 지급 내역</h3>
         <div className="overflow-x-auto">
-          <table className="min-w-[1320px] text-left text-sm">
+          <table className="min-w-[1180px] text-left text-sm">
             <thead className="bg-slate-50 text-xs font-semibold uppercase text-slate-500">
               <tr>
+                <th className="px-3 py-3">업체</th>
+                <th className="px-3 py-3">발주번호</th>
                 <th className="px-3 py-3">차수</th>
                 <th className="px-3 py-3">기성금액</th>
                 <th className="px-3 py-3">결재상태</th>
                 <th className="px-3 py-3">지급상태</th>
                 <th className="px-3 py-3">지급누계</th>
                 <th className="px-3 py-3">지급가능잔액</th>
-                <th className="px-3 py-3">지급금액</th>
-                <th className="px-3 py-3">지급일</th>
-                <th className="px-3 py-3">계좌정보</th>
-                <th className="px-3 py-3">확인증</th>
                 <th className="px-3 py-3">처리</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100">
-              {selectedPo.claims.map((claim) => {
-                const form = paymentForms[claim.claim_id] ?? { paid_amount: String(claim.remaining_payable || 0), paid_date: '', account_info: '', receipt_link: '' }
+              {paymentRows.map(({ po, claim }) => {
                 return (
                   <tr key={claim.claim_id}>
+                    <td className="px-3 py-3 font-semibold text-slate-900">{po.vendor_name}</td>
+                    <td className="px-3 py-3 text-cyan-800">{po.po_id}</td>
                     <td className="px-3 py-3 font-semibold text-slate-900">{claim.degree}차</td>
                     <td className="px-3 py-3">{formatWon(claim.claim_amount)}</td>
                     <td className="px-3 py-3">{claim.approval_status}</td>
@@ -1895,24 +2098,19 @@ function ProgressPaymentPanel({
                     </td>
                     <td className="px-3 py-3">{formatWon(claim.paid_total)}</td>
                     <td className="px-3 py-3">{formatWon(claim.remaining_payable)}</td>
-                    <td className="px-3 py-3"><MoneyInput value={toNumber(form.paid_amount)} onChange={(value) => setPaymentForms((forms) => ({ ...forms, [claim.claim_id]: { ...form, paid_amount: value } }))} /></td>
-                    <td className="px-3 py-3"><input type="date" value={form.paid_date} onChange={(event) => setPaymentForms((forms) => ({ ...forms, [claim.claim_id]: { ...form, paid_date: event.target.value } }))} className="input" /></td>
-                    <td className="px-3 py-3"><input value={form.account_info} onChange={(event) => setPaymentForms((forms) => ({ ...forms, [claim.claim_id]: { ...form, account_info: event.target.value } }))} className="input" /></td>
-                    <td className="px-3 py-3"><input value={form.receipt_link} onChange={(event) => setPaymentForms((forms) => ({ ...forms, [claim.claim_id]: { ...form, receipt_link: event.target.value } }))} className="input" /></td>
                     <td className="px-3 py-3">
                       <div className="flex gap-2">
                         {claim.approval_status !== 'APPROVED' && (
                           <button type="button" onClick={() => approveProgressClaim(claim.claim_id)} className="rounded-md border border-slate-300 px-3 py-2 text-xs font-semibold text-slate-700 hover:bg-slate-50">대표 승인</button>
                         )}
-                        <button type="button" onClick={() => createPayment(claim.claim_id)} disabled={claim.approval_status !== 'APPROVED'} className="rounded-md bg-cyan-700 px-3 py-2 text-xs font-semibold text-white hover:bg-cyan-800 disabled:cursor-not-allowed disabled:bg-slate-300">지급완료</button>
                       </div>
                     </td>
                   </tr>
                 )
               })}
-              {selectedPo.claims.length === 0 && (
+              {paymentRows.length === 0 && (
                 <tr>
-                  <td colSpan={11} className="px-3 py-8 text-center text-slate-500">등록된 기성 차수가 없습니다.</td>
+                  <td colSpan={9} className="px-3 py-8 text-center text-slate-500">등록된 기성 차수가 없습니다.</td>
                 </tr>
               )}
             </tbody>
@@ -2076,6 +2274,7 @@ function VendorComparisonPanel({
   updateVendorComparison,
   addVendorComparison,
   removeVendorComparison,
+  openPurchaseOrderHistory,
 }: {
   executionBudget: ExecutionBudgetDetailResponse
   selectedExecutionItemId: string
@@ -2088,9 +2287,12 @@ function VendorComparisonPanel({
   updateVendorComparison: (index: number, field: keyof VendorComparisonItem, value: string | boolean) => void
   addVendorComparison: () => void
   removeVendorComparison: (index: number) => void
+  openPurchaseOrderHistory: () => void
 }) {
   const selected = comparisons.find((comparison) => comparison.is_selected)
   const approvedBudget = vendorComparison.approved_execution_budget || 0
+  const isPurchaseOrderLocked = purchaseOrderDraft?.approval_status === 'REQUESTED' || purchaseOrderDraft?.approval_status === 'APPROVED'
+  const canRequestPurchaseOrder = executionBudget.approval_status === 'APPROVED' && !!selected && !isPurchaseOrderLocked
 
   return (
     <div>
@@ -2100,11 +2302,11 @@ function VendorComparisonPanel({
           <p className="mt-1 text-sm text-slate-500">승인 실행예산을 기준으로 업체 견적을 비교하고 선정 업체를 발주품의로 연결합니다.</p>
         </div>
         <div className="flex flex-wrap gap-2">
-          <button type="button" onClick={saveVendorComparisons} className="inline-flex items-center gap-2 rounded-md bg-slate-900 px-4 py-2 text-sm font-semibold text-white hover:bg-slate-800">
+          <button type="button" onClick={saveVendorComparisons} disabled={isPurchaseOrderLocked} className="inline-flex items-center gap-2 rounded-md bg-slate-900 px-4 py-2 text-sm font-semibold text-white hover:bg-slate-800 disabled:cursor-not-allowed disabled:bg-slate-300">
             <Save className="h-4 w-4" aria-hidden="true" />
             비교견적 저장
           </button>
-          <button type="button" onClick={requestPurchaseOrder} className="inline-flex items-center gap-2 rounded-md bg-cyan-700 px-4 py-2 text-sm font-semibold text-white hover:bg-cyan-800">
+          <button type="button" onClick={requestPurchaseOrder} disabled={!canRequestPurchaseOrder} className="inline-flex items-center gap-2 rounded-md bg-cyan-700 px-4 py-2 text-sm font-semibold text-white hover:bg-cyan-800 disabled:cursor-not-allowed disabled:bg-slate-300">
             발주품의 요청
           </button>
         </div>
@@ -2143,7 +2345,15 @@ function VendorComparisonPanel({
             </div>
             <p className="mt-3">선정 사유: {selected.selection_reason || '-'}</p>
             {purchaseOrderDraft && (
-              <p className="mt-2 text-xs font-semibold text-slate-500">결재상태: {purchaseOrderDraft.approval_status}</p>
+              <div className="mt-3 rounded-md bg-white px-3 py-2 text-xs font-semibold text-slate-600">
+                <p>결재상태: {purchaseOrderDraft.approval_status}</p>
+                {purchaseOrderDraft.po_id && (
+                  <div className="mt-2 flex flex-wrap items-center gap-2 text-cyan-800">
+                    <span>발주 확정 · {purchaseOrderDraft.po_id} · {purchaseOrderDraft.approved_at?.slice(0, 10) ?? '-'} · {purchaseOrderDraft.approver ?? '-'}</span>
+                    <button type="button" onClick={openPurchaseOrderHistory} className="rounded border border-cyan-300 px-2 py-1 text-xs font-semibold hover:bg-cyan-50">계약/발주 이력 보기</button>
+                  </div>
+                )}
+              </div>
             )}
           </div>
         </div>
@@ -2178,28 +2388,28 @@ function VendorComparisonPanel({
                 const variance = (comparison.quoted_amount || 0) - approvedBudget
                 return (
                   <tr key={comparison.comparison_id ?? index}>
-                    <td className="px-3 py-3"><input value={comparison.comparison_code ?? ''} onChange={(event) => updateVendorComparison(index, 'comparison_code', event.target.value)} className="input" /></td>
+                    <td className="px-3 py-3"><input disabled={isPurchaseOrderLocked} value={comparison.comparison_code ?? ''} onChange={(event) => updateVendorComparison(index, 'comparison_code', event.target.value)} className="input" /></td>
                     <td className="px-3 py-3 text-slate-600">{vendorComparison.project_code}</td>
                     <td className="px-3 py-3 text-slate-600">{vendorComparison.execution_item_id}</td>
                     <td className="px-3 py-3 text-slate-600">{vendorComparison.work_category}</td>
                     <td className="px-3 py-3 text-slate-600">{vendorComparison.execution_item_name}</td>
                     <td className="px-3 py-3 font-semibold text-slate-900">{formatWon(approvedBudget)}</td>
-                    <td className="px-3 py-3"><input value={comparison.vendor_name} onChange={(event) => updateVendorComparison(index, 'vendor_name', event.target.value)} className="input" /></td>
-                    <td className="px-3 py-3"><MoneyInput value={comparison.quoted_amount} onChange={(value) => updateVendorComparison(index, 'quoted_amount', value)} /></td>
+                    <td className="px-3 py-3"><input disabled={isPurchaseOrderLocked} value={comparison.vendor_name} onChange={(event) => updateVendorComparison(index, 'vendor_name', event.target.value)} className="input" /></td>
+                    <td className="px-3 py-3"><MoneyInput value={comparison.quoted_amount} disabled={isPurchaseOrderLocked} onChange={(value) => updateVendorComparison(index, 'quoted_amount', value)} /></td>
                     <td className="px-3 py-3">
-                      <select value={comparison.vat_type} onChange={(event) => updateVendorComparison(index, 'vat_type', event.target.value)} className="input">
+                      <select disabled={isPurchaseOrderLocked} value={comparison.vat_type} onChange={(event) => updateVendorComparison(index, 'vat_type', event.target.value)} className="input">
                         {vatTypes.map((type) => <option key={type} value={type}>{type}</option>)}
                       </select>
                     </td>
-                    <td className="px-3 py-3"><input value={comparison.construction_period ?? ''} onChange={(event) => updateVendorComparison(index, 'construction_period', event.target.value)} className="input" /></td>
-                    <td className="px-3 py-3"><input value={comparison.scope_and_notes ?? ''} onChange={(event) => updateVendorComparison(index, 'scope_and_notes', event.target.value)} className="input" /></td>
-                    <td className="px-3 py-3"><input value={comparison.payment_terms ?? ''} onChange={(event) => updateVendorComparison(index, 'payment_terms', event.target.value)} className="input" /></td>
-                    <td className="px-3 py-3"><input value={comparison.estimate_file_url ?? ''} onChange={(event) => updateVendorComparison(index, 'estimate_file_url', event.target.value)} className="input" /></td>
-                    <td className="px-3 py-3 text-center"><input type="radio" checked={comparison.is_selected} onChange={() => updateVendorComparison(index, 'is_selected', true)} /></td>
-                    <td className="px-3 py-3"><input value={comparison.selection_reason ?? ''} onChange={(event) => updateVendorComparison(index, 'selection_reason', event.target.value)} className="input" /></td>
+                    <td className="px-3 py-3"><input disabled={isPurchaseOrderLocked} value={comparison.construction_period ?? ''} onChange={(event) => updateVendorComparison(index, 'construction_period', event.target.value)} className="input" /></td>
+                    <td className="px-3 py-3"><input disabled={isPurchaseOrderLocked} value={comparison.scope_and_notes ?? ''} onChange={(event) => updateVendorComparison(index, 'scope_and_notes', event.target.value)} className="input" /></td>
+                    <td className="px-3 py-3"><input disabled={isPurchaseOrderLocked} value={comparison.payment_terms ?? ''} onChange={(event) => updateVendorComparison(index, 'payment_terms', event.target.value)} className="input" /></td>
+                    <td className="px-3 py-3"><input disabled={isPurchaseOrderLocked} value={comparison.estimate_file_url ?? ''} onChange={(event) => updateVendorComparison(index, 'estimate_file_url', event.target.value)} className="input" /></td>
+                    <td className="px-3 py-3 text-center"><input disabled={isPurchaseOrderLocked} type="radio" checked={comparison.is_selected} onChange={() => updateVendorComparison(index, 'is_selected', true)} /></td>
+                    <td className="px-3 py-3"><input disabled={isPurchaseOrderLocked} value={comparison.selection_reason ?? ''} onChange={(event) => updateVendorComparison(index, 'selection_reason', event.target.value)} className="input" /></td>
                     <td className={`px-3 py-3 font-semibold ${varianceClass(variance)}`}>{formatWon(variance)}</td>
                     <td className="px-3 py-3">
-                      <button type="button" onClick={() => removeVendorComparison(index)} className="rounded-md p-2 text-slate-500 hover:bg-rose-50 hover:text-rose-700" aria-label="행 삭제">
+                      <button type="button" disabled={isPurchaseOrderLocked} onClick={() => removeVendorComparison(index)} className="rounded-md p-2 text-slate-500 hover:bg-rose-50 hover:text-rose-700 disabled:cursor-not-allowed disabled:opacity-40" aria-label="행 삭제">
                         <Trash2 className="h-4 w-4" aria-hidden="true" />
                       </button>
                     </td>
@@ -2209,10 +2419,94 @@ function VendorComparisonPanel({
             </tbody>
           </table>
         </div>
-        <button type="button" onClick={addVendorComparison} className="mt-4 inline-flex items-center gap-2 rounded-md border border-slate-300 px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50">
+        <button type="button" disabled={isPurchaseOrderLocked} onClick={addVendorComparison} className="mt-4 inline-flex items-center gap-2 rounded-md border border-slate-300 px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-40">
           <Plus className="h-4 w-4" aria-hidden="true" />
           업체 행 추가
         </button>
+      </div>
+    </div>
+  )
+}
+
+function PurchaseOrderHistoryPanel({ purchaseOrders, changeOrders = [] }: { purchaseOrders: PurchaseOrderHistoryItem[]; changeOrders?: ChangeOrder[] }) {
+  return (
+    <div>
+      <div className="border-b border-slate-200 pb-4">
+        <h3 className="text-lg font-semibold text-slate-950">계약·발주 이력</h3>
+        <p className="mt-1 text-sm text-slate-500">발주 결재가 승인된 선정 업체만 정식 발주로 표시합니다.</p>
+      </div>
+      {false && <section className="border-b border-slate-200 py-5">
+        <h4 className="text-sm font-semibold text-slate-900">변경 이력</h4>
+        <p className="mt-1 text-sm text-slate-500">대표 정정은 현재 금액에 즉시 반영되고, 최초 금액과 증감 내역은 아래 이력으로 보관됩니다.</p>
+        <div className="mt-3 overflow-x-auto rounded-md border border-slate-200">
+          <table className="min-w-[900px] text-left text-sm">
+            <thead className="bg-slate-50 text-xs font-semibold uppercase text-slate-500"><tr><th className="px-3 py-3">변경번호</th><th className="px-3 py-3">일시</th><th className="px-3 py-3">사유</th><th className="px-3 py-3">계약 증감</th><th className="px-3 py-3">실행예산 증감</th><th className="px-3 py-3">발주 증감</th><th className="px-3 py-3">연결 항목</th></tr></thead>
+            <tbody className="divide-y divide-slate-100">
+              {changeOrders.map((change) => <tr key={change.change_order_id}><td className="px-3 py-3 font-semibold text-cyan-800">{change.change_order_id}</td><td className="px-3 py-3 text-slate-600">{formatDate(change.created_at?.slice(0, 10))}</td><td className="px-3 py-3 text-slate-700">{change.reason}</td><td className="px-3 py-3 font-semibold">{formatWon(change.contract_delta_amount)}</td><td className="px-3 py-3">{formatWon(change.budget_delta_amount)}</td><td className="px-3 py-3">{formatWon(change.purchase_order_delta_amount)}</td><td className="px-3 py-3 text-slate-600">{change.impacts.map((impact) => `${impact.label} (${formatWon(impact.delta_amount)})`).join(', ')}</td></tr>)}
+              {changeOrders.length === 0 && <tr><td colSpan={7} className="px-3 py-8 text-center text-slate-500">등록된 변경 이력이 없습니다.</td></tr>}
+            </tbody>
+          </table>
+        </div>
+      </section>}
+      <div className="overflow-x-auto py-5">
+        <table className="min-w-[1500px] text-left text-sm">
+          <thead className="bg-slate-50 text-xs font-semibold uppercase text-slate-500">
+            <tr>
+              <th className="px-3 py-3">발주번호</th><th className="px-3 py-3">실행항목</th><th className="px-3 py-3">선정 업체</th><th className="px-3 py-3">승인 실행예산</th><th className="px-3 py-3">현재 발주금액</th><th className="px-3 py-3">예산 대비</th><th className="px-3 py-3">승인 정보</th><th className="px-3 py-3">기성 / 지급 / 미지급</th><th className="px-3 py-3">선정 근거</th>
+            </tr>
+          </thead>
+          <tbody className="divide-y divide-slate-100">
+            {purchaseOrders.map((purchaseOrder) => (
+              <tr key={purchaseOrder.po_id}>
+                <td className="px-3 py-3 font-semibold text-cyan-800">{purchaseOrder.po_id}</td>
+                <td className="px-3 py-3 text-slate-700">{purchaseOrder.execution_item_id} · {purchaseOrder.work_category}<br />{purchaseOrder.execution_item_name}</td>
+                <td className="px-3 py-3 font-semibold text-slate-900">{purchaseOrder.vendor_name}</td>
+                <td className="px-3 py-3 text-slate-700">{formatWon(purchaseOrder.approved_execution_budget)}</td>
+                <td className="px-3 py-3 font-semibold text-slate-900">{formatWon(purchaseOrder.current_po_amount)}</td>
+                <td className={`px-3 py-3 font-semibold ${varianceClass(purchaseOrder.budget_variance)}`}>{formatWon(purchaseOrder.budget_variance)}</td>
+                <td className="px-3 py-3 text-slate-600">{formatDate(purchaseOrder.approved_at?.slice(0, 10))}<br />{purchaseOrder.approver ?? '-'}</td>
+                <td className="px-3 py-3 text-slate-600">{formatWon(purchaseOrder.approved_claim_total)} / {formatWon(purchaseOrder.actual_paid_total)} / {formatWon(purchaseOrder.total_unpaid_balance)}</td>
+                <td className="px-3 py-3 text-slate-600"><p>{purchaseOrder.selection_reason || '-'}</p><p className="mt-1 text-xs">{purchaseOrder.construction_period || '-'} · {purchaseOrder.payment_terms || '-'}</p></td>
+              </tr>
+            ))}
+            {purchaseOrders.length === 0 && <tr><td colSpan={9} className="px-3 py-10 text-center text-slate-500">승인된 정식 발주가 없습니다.</td></tr>}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  )
+}
+
+function ChangeHistoryPanel({ changeOrders }: { changeOrders: ChangeOrder[] }) {
+  return (
+    <div>
+      <div className="border-b border-slate-200 pb-4">
+        <h3 className="text-lg font-semibold text-slate-950">변경관리 이력</h3>
+        <p className="mt-1 text-sm text-slate-500">대표 금액 정정으로 즉시 반영된 현재 금액과, 최초 금액을 보존하기 위한 증감 이력을 관리합니다.</p>
+      </div>
+      <div className="py-5">
+        <div className="overflow-x-auto rounded-md border border-slate-200">
+          <table className="min-w-[1050px] text-left text-sm">
+            <thead className="bg-slate-50 text-xs font-semibold uppercase text-slate-500">
+              <tr><th className="px-3 py-3">변경번호</th><th className="px-3 py-3">일시</th><th className="px-3 py-3">처리자</th><th className="px-3 py-3">사유</th><th className="px-3 py-3">계약 증감</th><th className="px-3 py-3">실행예산 증감</th><th className="px-3 py-3">발주 증감</th><th className="px-3 py-3">연결 항목</th></tr>
+            </thead>
+            <tbody className="divide-y divide-slate-100">
+              {changeOrders.map((change) => (
+                <tr key={change.change_order_id}>
+                  <td className="px-3 py-3 font-semibold text-cyan-800">{change.change_order_id}</td>
+                  <td className="px-3 py-3 text-slate-600">{formatDate(change.created_at?.slice(0, 10))}</td>
+                  <td className="px-3 py-3 text-slate-700">{change.requested_by}</td>
+                  <td className="px-3 py-3 text-slate-700">{change.reason}</td>
+                  <td className="px-3 py-3 font-semibold">{formatWon(change.contract_delta_amount)}</td>
+                  <td className="px-3 py-3">{formatWon(change.budget_delta_amount)}</td>
+                  <td className="px-3 py-3">{formatWon(change.purchase_order_delta_amount)}</td>
+                  <td className="px-3 py-3 text-slate-600">{change.impacts.map((impact) => `${impact.label} (${formatWon(impact.delta_amount)})`).join(', ')}</td>
+                </tr>
+              ))}
+              {changeOrders.length === 0 && <tr><td colSpan={8} className="px-3 py-10 text-center text-slate-500">등록된 변경 이력이 없습니다.</td></tr>}
+            </tbody>
+          </table>
+        </div>
       </div>
     </div>
   )
@@ -2266,14 +2560,144 @@ function MetricPanel({
   )
 }
 
-function MoneyInput({ value, onChange }: { value: number; onChange: (value: string) => void }) {
+function ApprovalInboxPanel({
+  approvals,
+  selectedApproval,
+  statusFilter,
+  typeFilter,
+  rejectComment,
+  setStatusFilter,
+  setTypeFilter,
+  setRejectComment,
+  loadApprovalDetail,
+  approveApproval,
+  rejectApproval,
+}: {
+  approvals: ApprovalItem[]
+  selectedApproval: ApprovalItem | null
+  statusFilter: string
+  typeFilter: string
+  rejectComment: string
+  setStatusFilter: (value: string) => void
+  setTypeFilter: (value: string) => void
+  setRejectComment: (value: string) => void
+  loadApprovalDetail: (approvalId: string) => void
+  approveApproval: (approvalId: string) => void
+  rejectApproval: (approvalId: string) => void
+}) {
+  const pending = selectedApproval?.status === 'REQUESTED'
+
+  return (
+    <div>
+      <div className="flex flex-col gap-4 border-b border-slate-200 pb-4 lg:flex-row lg:items-center lg:justify-between">
+        <div>
+          <h3 className="text-lg font-semibold text-slate-950">통합결재함</h3>
+          <p className="mt-1 text-sm text-slate-500">실행예산과 발주품의 결재를 한 화면에서 승인하거나 반려합니다.</p>
+        </div>
+        <div className="flex flex-wrap gap-2">
+          <select value={statusFilter} onChange={(event) => setStatusFilter(event.target.value)} className="input w-36">
+            <option value="">전체 상태</option>
+            <option value="REQUESTED">결재대기</option>
+            <option value="APPROVED">승인</option>
+            <option value="REJECTED">반려</option>
+          </select>
+          <select value={typeFilter} onChange={(event) => setTypeFilter(event.target.value)} className="input w-44">
+            <option value="">전체 유형</option>
+            <option value="EXECUTION_BUDGET">실행예산</option>
+            <option value="PURCHASE_ORDER">발주</option>
+          </select>
+        </div>
+      </div>
+
+      <div className="grid gap-5 py-5 xl:grid-cols-[minmax(0,1.4fr)_minmax(360px,0.8fr)]">
+        <div className="overflow-x-auto">
+          <table className="min-w-[980px] text-left text-sm">
+            <thead className="bg-slate-50 text-xs font-semibold uppercase text-slate-500">
+              <tr>
+                <th className="px-3 py-3">요청일</th>
+                <th className="px-3 py-3">프로젝트</th>
+                <th className="px-3 py-3">유형</th>
+                <th className="px-3 py-3">제목</th>
+                <th className="px-3 py-3">요청금액</th>
+                <th className="px-3 py-3">증감</th>
+                <th className="px-3 py-3">상태</th>
+                <th className="px-3 py-3"></th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-slate-100">
+              {approvals.map((approval) => (
+                <tr key={approval.approval_id}>
+                  <td className="px-3 py-3 text-slate-600">{formatDate(approval.requested_at?.slice(0, 10))}</td>
+                  <td className="px-3 py-3 font-semibold text-slate-900">{approval.project_code}</td>
+                  <td className="px-3 py-3 text-slate-600">{approval.approval_type}</td>
+                  <td className="px-3 py-3 text-slate-600">{approval.title}</td>
+                  <td className="px-3 py-3 font-semibold text-slate-900">{formatWon(approval.requested_amount)}</td>
+                  <td className={`px-3 py-3 font-semibold ${varianceClass(approval.variance_amount)}`}>{formatWon(approval.variance_amount)}</td>
+                  <td className="px-3 py-3 text-slate-600">{approval.status}</td>
+                  <td className="px-3 py-3">
+                    <button type="button" onClick={() => loadApprovalDetail(approval.approval_id)} className="rounded-md border border-slate-300 px-3 py-1.5 text-xs font-semibold text-slate-700 hover:bg-slate-50">
+                      상세
+                    </button>
+                  </td>
+                </tr>
+              ))}
+              {approvals.length === 0 && (
+                <tr>
+                  <td colSpan={8} className="px-3 py-8 text-center text-slate-500">표시할 결재 건이 없습니다.</td>
+                </tr>
+              )}
+            </tbody>
+          </table>
+        </div>
+
+        <aside className="rounded-md border border-slate-200 bg-slate-50 p-4">
+          {selectedApproval ? (
+            <div>
+              <div className="border-b border-slate-200 pb-3">
+                <p className="text-xs font-semibold text-slate-500">{selectedApproval.approval_type}</p>
+                <h4 className="mt-1 text-base font-semibold text-slate-950">{selectedApproval.title}</h4>
+                <p className="mt-1 text-sm text-slate-500">{selectedApproval.project_code} · {selectedApproval.status}</p>
+              </div>
+              <div className="space-y-2 py-4 text-sm text-slate-700">
+                <p>요청금액: <strong>{formatWon(selectedApproval.requested_amount)}</strong></p>
+                <p>기준금액: <strong>{formatWon(selectedApproval.previous_amount)}</strong></p>
+                <p>증감액: <strong className={varianceClass(selectedApproval.variance_amount)}>{formatWon(selectedApproval.variance_amount)}</strong></p>
+                <p>요청자: {selectedApproval.request_user}</p>
+                <p>요청사유: {selectedApproval.request_reason || '-'}</p>
+                {selectedApproval.comment && <p>처리의견: {selectedApproval.comment}</p>}
+              </div>
+              {pending && (
+                <div className="border-t border-slate-200 pt-4">
+                  <textarea value={rejectComment} onChange={(event) => setRejectComment(event.target.value)} placeholder="반려 사유" className="input min-h-24" />
+                  <div className="mt-3 flex justify-end gap-2">
+                    <button type="button" onClick={() => rejectApproval(selectedApproval.approval_id)} disabled={!rejectComment.trim()} className="rounded-md border border-rose-300 px-3 py-2 text-sm font-semibold text-rose-700 hover:bg-rose-50 disabled:cursor-not-allowed disabled:opacity-40">
+                      반려
+                    </button>
+                    <button type="button" onClick={() => approveApproval(selectedApproval.approval_id)} className="rounded-md bg-cyan-700 px-3 py-2 text-sm font-semibold text-white hover:bg-cyan-800">
+                      승인
+                    </button>
+                  </div>
+                </div>
+              )}
+            </div>
+          ) : (
+            <p className="py-12 text-center text-sm text-slate-500">결재 건을 선택하세요.</p>
+          )}
+        </aside>
+      </div>
+    </div>
+  )
+}
+
+function MoneyInput({ value, onChange, disabled = false }: { value: number; onChange: (value: string) => void; disabled?: boolean }) {
   return (
     <div className="flex items-center gap-2 rounded-md border border-slate-300 bg-white px-3 py-2 focus-within:border-cyan-700 focus-within:ring-2 focus-within:ring-cyan-700/15">
       <input
+        disabled={disabled}
         value={currency.format(Math.round(value || 0))}
         onChange={(event) => onChange(event.target.value)}
         inputMode="numeric"
-        className="w-full border-0 bg-transparent text-sm outline-none"
+        className="w-full border-0 bg-transparent text-sm outline-none disabled:cursor-not-allowed"
       />
       <span className="shrink-0 text-xs font-semibold text-slate-400">원</span>
     </div>
@@ -2336,7 +2760,7 @@ function ProjectCreationModal({
         <div className="sticky top-0 flex items-center justify-between border-b border-slate-200 bg-white px-5 py-4">
           <div>
             <h2 className="text-lg font-semibold text-slate-950">신규 프로젝트 등록</h2>
-            <p className="mt-1 text-sm text-slate-500">프로젝트번호는 비워두면 자동 생성됩니다.</p>
+            <p className="mt-1 text-sm text-slate-500">프로젝트번호는 등록 시 자동 생성됩니다.</p>
           </div>
           <button type="button" onClick={onClose} className="rounded-md p-2 text-slate-500 hover:bg-slate-100" aria-label="닫기">
             <X className="h-5 w-5" aria-hidden="true" />
@@ -2346,9 +2770,6 @@ function ProjectCreationModal({
         <div className="grid gap-4 p-5 md:grid-cols-2">
           <Field label="프로젝트명" required>
             <input required value={form.project_name} onChange={(e) => update('project_name', e.target.value)} placeholder="성가수녀원 리뉴얼공사" className="input" />
-          </Field>
-          <Field label="프로젝트번호">
-            <input value={form.project_code} onChange={(e) => update('project_code', e.target.value)} placeholder="P-2026-001" className="input" />
           </Field>
           <Field label="고객/발주처">
             <input value={form.client_name} onChange={(e) => update('client_name', e.target.value)} className="input" />
@@ -2370,13 +2791,6 @@ function ProjectCreationModal({
           </Field>
           <Field label="담당자">
             <input value={form.manager_id} onChange={(e) => update('manager_id', e.target.value)} placeholder="usr_pm_02" className="input" />
-          </Field>
-          <Field label="프로젝트 상태">
-            <select value={form.status} onChange={(e) => update('status', e.target.value)} className="input">
-              {statuses.map((status) => (
-                <option key={status} value={status}>{status}</option>
-              ))}
-            </select>
           </Field>
           <Field label="비고">
             <input value={form.note} onChange={(e) => update('note', e.target.value)} className="input" />

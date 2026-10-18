@@ -83,6 +83,8 @@ public record ApprovalResponse(
 	}
 
 	public record PurchaseOrderDetail(
+			@JsonProperty("po_id")
+			String poId,
 			@JsonProperty("execution_item_id")
 			String executionItemId,
 			@JsonProperty("work_category")

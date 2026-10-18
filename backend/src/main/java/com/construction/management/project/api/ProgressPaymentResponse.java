@@ -8,6 +8,8 @@ import java.util.List;
 public record ProgressPaymentResponse(
 		@JsonProperty("project_id") String projectId,
 		@JsonProperty("project_code") String projectCode,
+		@JsonProperty("all_payments_approved") boolean allPaymentsApproved,
+		@JsonProperty("pending_payment_approval_count") long pendingPaymentApprovalCount,
 		List<PurchaseOrderStatus> purchaseOrders
 ) {
 	public record PurchaseOrderStatus(
@@ -19,6 +21,7 @@ public record ProgressPaymentResponse(
 			@JsonProperty("unclaimed_amount") BigDecimal unclaimedAmount,
 			@JsonProperty("approved_unpaid_amount") BigDecimal approvedUnpaidAmount,
 			@JsonProperty("total_unpaid_balance") BigDecimal totalUnpaidBalance,
+			@JsonProperty("payment_request_status") String paymentRequestStatus,
 			List<ClaimStatus> claims
 	) {
 	}

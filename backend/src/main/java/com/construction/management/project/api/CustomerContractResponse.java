@@ -17,10 +17,14 @@ public record CustomerContractResponse(
 		BigDecimal targetProfitRate,
 		@JsonProperty("total_contract_supply_amount")
 		BigDecimal totalContractSupplyAmount,
+		@JsonProperty("current_contract_supply_amount")
+		BigDecimal currentContractSupplyAmount,
 		@JsonProperty("total_vat_amount")
 		BigDecimal totalVatAmount,
 		@JsonProperty("total_contract_with_vat")
 		BigDecimal totalContractWithVat,
+		@JsonProperty("current_contract_with_vat")
+		BigDecimal currentContractWithVat,
 		@JsonProperty("target_cost_limit")
 		BigDecimal targetCostLimit,
 		List<Item> items,

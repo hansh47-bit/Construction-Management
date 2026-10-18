@@ -24,6 +24,7 @@ import jakarta.persistence.EntityNotFoundException;
 import java.math.BigDecimal;
 import java.time.Year;
 import java.util.List;
+import java.util.Objects;
 import java.util.UUID;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -43,6 +44,7 @@ public class ApprovalService {
 	private final PurchaseOrderRepository purchaseOrderRepository;
 	private final ExecutionBudgetDetailService executionBudgetDetailService;
 	private final ProjectSettlementService projectSettlementService;
+	private final PaymentRequestService paymentRequestService;
 
 	public ApprovalService(
 			ApprovalRepository approvalRepository,
@@ -53,7 +55,8 @@ public class ApprovalService {
 			VendorComparisonRepository comparisonRepository,
 			PurchaseOrderRepository purchaseOrderRepository,
 			ExecutionBudgetDetailService executionBudgetDetailService,
-			ProjectSettlementService projectSettlementService
+			ProjectSettlementService projectSettlementService,
+			PaymentRequestService paymentRequestService
 	) {
 		this.approvalRepository = approvalRepository;
 		this.projectRepository = projectRepository;
@@ -64,6 +67,7 @@ public class ApprovalService {
 		this.purchaseOrderRepository = purchaseOrderRepository;
 		this.executionBudgetDetailService = executionBudgetDetailService;
 		this.projectSettlementService = projectSettlementService;
+		this.paymentRequestService = paymentRequestService;
 	}
 
 	@Transactional(readOnly = true)
@@ -168,6 +172,8 @@ public class ApprovalService {
 			approveExecutionBudget(approval);
 		} else if (TYPE_PURCHASE_ORDER.equals(approval.getApprovalType())) {
 			approvePurchaseOrder(approval, request);
+		} else if (PaymentRequestService.TYPE_PAYMENT.equals(approval.getApprovalType())) {
+			paymentRequestService.approve(approval, request);
 		} else {
 			throw new IllegalArgumentException("지원하지 않는 결재 유형입니다: " + approval.getApprovalType());
 		}
@@ -191,6 +197,8 @@ public class ApprovalService {
 			PoRequisition requisition = getRequisition(approval);
 			requisition.reject(decisionUser(request), request.comment());
 			requisitionRepository.save(requisition);
+		} else if (PaymentRequestService.TYPE_PAYMENT.equals(approval.getApprovalType())) {
+			paymentRequestService.reject(approval);
 		}
 		approval.reject(decisionUser(request), request.comment());
 		approvalRepository.save(approval);
@@ -223,8 +231,17 @@ public class ApprovalService {
 		}
 		VendorComparison selected = comparisonRepository.findById(requisition.getSelectedComparisonId())
 				.orElseThrow(() -> new EntityNotFoundException("선정 비교견적을 찾을 수 없습니다: " + requisition.getSelectedComparisonId()));
-		purchaseOrderRepository.save(new PurchaseOrder(nextPurchaseOrderId(), approval.getProjectId(), requisition.getExecutionItemId(), selected.getVendorName(), requisition.getPoAmount()));
-		requisition.approve(decisionUser(request), request == null ? null : request.comment());
+		if (!selected.isSelected()) {
+			throw new IllegalStateException("선정되지 않은 비교견적으로 발주를 승인할 수 없습니다.");
+		}
+		if (defaultZero(selected.getQuotedAmount()).compareTo(defaultZero(requisition.getPoAmount())) != 0
+				|| !Objects.equals(selected.getSelectionReason(), requisition.getSelectionReason())) {
+			throw new IllegalStateException("선정 비교견적과 발주품의 내용이 일치하지 않습니다. 발주품의를 다시 요청해야 합니다.");
+		}
+		String approver = decisionUser(request);
+		String comment = request == null ? null : request.comment();
+		purchaseOrderRepository.save(new PurchaseOrder(nextPurchaseOrderId(), approval.getProjectId(), requisition.getExecutionItemId(), requisition, selected, approver, comment));
+		requisition.approve(approver, comment);
 		requisitionRepository.save(requisition);
 	}
 
@@ -263,6 +280,7 @@ public class ApprovalService {
 					))
 					.toList();
 			return new ApprovalResponse.PurchaseOrderDetail(
+					purchaseOrderRepository.findByRequisitionId(requisition.getRequisitionId()).map(PurchaseOrder::getPoId).orElse(null),
 					item.getItemId(),
 					item.getCategoryName(),
 					item.getItemName(),
@@ -313,7 +331,20 @@ public class ApprovalService {
 	}
 
 	private String nextPurchaseOrderId() {
-		return "PO-" + Year.now().getValue() + "-" + UUID.randomUUID().toString().substring(0, 8).toUpperCase();
+		String prefix = "PO-" + Year.now().getValue() + "-";
+		int nextSequence = purchaseOrderRepository.findByPoIdStartingWithOrderByPoIdDesc(prefix).stream()
+				.map(PurchaseOrder::getPoId)
+				.map(code -> code.substring(prefix.length()))
+				.mapToInt(sequence -> {
+					try {
+						return Integer.parseInt(sequence);
+					} catch (NumberFormatException ignored) {
+						return 0;
+					}
+				})
+				.max()
+				.orElse(0) + 1;
+		return "%s%03d".formatted(prefix, nextSequence);
 	}
 
 	private static String requestUser(ApprovalRequest request) {

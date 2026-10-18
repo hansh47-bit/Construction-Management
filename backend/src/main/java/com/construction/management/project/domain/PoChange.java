@@ -47,4 +47,8 @@ public class PoChange {
 	public String getPoId() {
 		return poId;
 	}
+
+	public String getChangeId() { return changeId; }
+	public String getChangeCode() { return changeCode; }
+	public ApprovalStatus getApprovalStatus() { return approvalStatus; }
 }

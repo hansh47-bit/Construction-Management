@@ -40,10 +40,15 @@ public class ContractChange {
 	}
 
 	public ContractChange(String changeId, String projectId, String changeCode, BigDecimal changeAmount, ApprovalStatus approvalStatus) {
+		this(changeId, projectId, changeCode, changeAmount, null, approvalStatus);
+	}
+
+	public ContractChange(String changeId, String projectId, String changeCode, BigDecimal changeAmount, String reason, ApprovalStatus approvalStatus) {
 		this.changeId = changeId;
 		this.projectId = projectId;
 		this.changeCode = changeCode;
 		this.changeAmount = changeAmount;
+		this.reason = reason;
 		this.approvalStatus = approvalStatus;
 		this.approvedAt = approvalStatus == ApprovalStatus.APPROVED ? LocalDateTime.now() : null;
 	}
@@ -51,4 +56,10 @@ public class ContractChange {
 	public BigDecimal getChangeAmount() {
 		return changeAmount;
 	}
+
+	public String getChangeId() { return changeId; }
+	public String getChangeCode() { return changeCode; }
+	public String getReason() { return reason; }
+	public ApprovalStatus getApprovalStatus() { return approvalStatus; }
+	public LocalDateTime getApprovedAt() { return approvedAt; }
 }

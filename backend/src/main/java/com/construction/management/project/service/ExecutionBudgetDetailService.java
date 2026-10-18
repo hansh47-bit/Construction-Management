@@ -5,11 +5,15 @@ import com.construction.management.project.api.ExecutionBudgetDetailResponse;
 import com.construction.management.project.api.ExecutionBudgetDetailResponse.Detail;
 import com.construction.management.project.api.ExecutionBudgetDetailResponse.SummaryItem;
 import com.construction.management.project.domain.ApprovalStatus;
+import com.construction.management.project.domain.BudgetChange;
+import com.construction.management.project.domain.ContractChange;
 import com.construction.management.project.domain.CustomerContractItem;
 import com.construction.management.project.domain.Project;
 import com.construction.management.project.domain.ProjectExecutionBudgetDetail;
 import com.construction.management.project.domain.ProjectExecutionBudgetItem;
 import com.construction.management.project.repository.CustomerContractItemRepository;
+import com.construction.management.project.repository.BudgetChangeRepository;
+import com.construction.management.project.repository.ContractChangeRepository;
 import com.construction.management.project.repository.ProjectExecutionBudgetDetailRepository;
 import com.construction.management.project.repository.ProjectExecutionBudgetItemRepository;
 import com.construction.management.project.repository.ProjectRepository;
@@ -34,19 +38,25 @@ public class ExecutionBudgetDetailService {
 	private final ProjectExecutionBudgetItemRepository itemRepository;
 	private final ProjectExecutionBudgetDetailRepository detailRepository;
 	private final ProjectSettlementService projectSettlementService;
+	private final BudgetChangeRepository budgetChangeRepository;
+	private final ContractChangeRepository contractChangeRepository;
 
 	public ExecutionBudgetDetailService(
 			ProjectRepository projectRepository,
 			CustomerContractItemRepository customerContractItemRepository,
 			ProjectExecutionBudgetItemRepository itemRepository,
 			ProjectExecutionBudgetDetailRepository detailRepository,
-			ProjectSettlementService projectSettlementService
+			ProjectSettlementService projectSettlementService,
+			BudgetChangeRepository budgetChangeRepository,
+			ContractChangeRepository contractChangeRepository
 	) {
 		this.projectRepository = projectRepository;
 		this.customerContractItemRepository = customerContractItemRepository;
 		this.itemRepository = itemRepository;
 		this.detailRepository = detailRepository;
 		this.projectSettlementService = projectSettlementService;
+		this.budgetChangeRepository = budgetChangeRepository;
+		this.contractChangeRepository = contractChangeRepository;
 	}
 
 	@Transactional(readOnly = true)
@@ -119,9 +129,11 @@ public class ExecutionBudgetDetailService {
 		String approvalStatus = executionBudgetApprovalStatus(items);
 		String approvalId = items.stream().map(ProjectExecutionBudgetItem::getApprovalId).filter(StringUtils::hasText).findFirst().orElse(null);
 		String approvalComment = items.stream().map(ProjectExecutionBudgetItem::getApprovalComment).filter(StringUtils::hasText).findFirst().orElse(null);
+		List<String> itemIds = items.stream().map(ProjectExecutionBudgetItem::getItemId).toList();
+		Map<String, BigDecimal> changesByItem = itemIds.isEmpty() ? Map.of() : budgetChangeRepository.findByBudgetIdInAndApprovalStatus(itemIds, ApprovalStatus.APPROVED).stream()
+				.collect(Collectors.groupingBy(BudgetChange::getBudgetId, Collectors.mapping(change -> defaultZero(change.getChangeAmount()), Collectors.reducing(BigDecimal.ZERO, BigDecimal::add))));
 		BigDecimal approvedAmount = items.stream()
-				.map(ProjectExecutionBudgetItem::getApprovedBudgetAmount)
-				.map(ExecutionBudgetDetailService::defaultZero)
+				.map(item -> defaultZero(item.getApprovedBudgetAmount()).add(changesByItem.getOrDefault(item.getItemId(), BigDecimal.ZERO)))
 				.reduce(BigDecimal.ZERO, BigDecimal::add);
 		BigDecimal totalDetailAmount = details.stream()
 				.map(ProjectExecutionBudgetDetail::getAmount)
@@ -130,7 +142,9 @@ public class ExecutionBudgetDetailService {
 		BigDecimal contractSupplyAmount = customerContractItemRepository.findByProjectIdOrderByWorkCategoryAsc(project.getProjectId()).stream()
 				.map(CustomerContractItem::getContractAmount)
 				.map(ExecutionBudgetDetailService::defaultZero)
-				.reduce(BigDecimal.ZERO, BigDecimal::add);
+				.reduce(BigDecimal.ZERO, BigDecimal::add)
+				.add(contractChangeRepository.findByProjectIdAndApprovalStatus(project.getProjectId(), ApprovalStatus.APPROVED).stream()
+						.map(ContractChange::getChangeAmount).map(ExecutionBudgetDetailService::defaultZero).reduce(BigDecimal.ZERO, BigDecimal::add));
 		BigDecimal targetCostLimit = contractSupplyAmount
 				.multiply(BigDecimal.ONE.subtract(defaultZero(project.getTargetProfitRate()).divide(BigDecimal.valueOf(100), 6, RoundingMode.HALF_UP)))
 				.setScale(0, RoundingMode.HALF_UP);
@@ -149,7 +163,8 @@ public class ExecutionBudgetDetailService {
 				targetCostLimit.compareTo(BigDecimal.ZERO) > 0 && totalDetailAmount.compareTo(targetCostLimit) > 0,
 				items.stream()
 						.sorted(Comparator.comparing(ProjectExecutionBudgetItem::getItemId))
-						.map(item -> new SummaryItem(item.getItemId(), item.getCategoryName(), item.getItemName(), item.getBudgetAmount()))
+						.map(item -> new SummaryItem(item.getItemId(), item.getCategoryName(), item.getItemName(),
+								item.isApproved() ? defaultZero(item.getApprovedBudgetAmount()).add(changesByItem.getOrDefault(item.getItemId(), BigDecimal.ZERO)) : item.getBudgetAmount()))
 						.toList(),
 				details.stream()
 						.map(detail -> new Detail(

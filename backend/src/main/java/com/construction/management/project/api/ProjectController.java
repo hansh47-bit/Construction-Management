@@ -3,10 +3,13 @@ package com.construction.management.project.api;
 import com.construction.management.project.domain.ContractFile;
 import com.construction.management.project.service.ApprovalService;
 import com.construction.management.project.service.CustomerContractService;
+import com.construction.management.project.service.ChangeManagementService;
 import com.construction.management.project.service.ExecutionBudgetDetailService;
 import com.construction.management.project.service.ProjectService;
 import com.construction.management.project.service.ProjectSettlementService;
 import com.construction.management.project.service.ProgressPaymentService;
+import com.construction.management.project.service.PurchaseOrderService;
+import com.construction.management.project.service.PaymentRequestService;
 import com.construction.management.project.service.VendorComparisonService;
 import jakarta.validation.Valid;
 import java.util.List;
@@ -33,27 +36,36 @@ public class ProjectController {
 
 	private final ProjectService projectService;
 	private final CustomerContractService customerContractService;
+	private final ChangeManagementService changeManagementService;
 	private final ExecutionBudgetDetailService executionBudgetDetailService;
 	private final VendorComparisonService vendorComparisonService;
 	private final ProgressPaymentService progressPaymentService;
 	private final ProjectSettlementService projectSettlementService;
+	private final PurchaseOrderService purchaseOrderService;
+	private final PaymentRequestService paymentRequestService;
 	private final ApprovalService approvalService;
 
 	public ProjectController(
 			ProjectService projectService,
 			CustomerContractService customerContractService,
+			ChangeManagementService changeManagementService,
 			ExecutionBudgetDetailService executionBudgetDetailService,
 			VendorComparisonService vendorComparisonService,
 			ProgressPaymentService progressPaymentService,
 			ProjectSettlementService projectSettlementService,
+			PurchaseOrderService purchaseOrderService,
+			PaymentRequestService paymentRequestService,
 			ApprovalService approvalService
 	) {
 		this.projectService = projectService;
 		this.customerContractService = customerContractService;
+		this.changeManagementService = changeManagementService;
 		this.executionBudgetDetailService = executionBudgetDetailService;
 		this.vendorComparisonService = vendorComparisonService;
 		this.progressPaymentService = progressPaymentService;
 		this.projectSettlementService = projectSettlementService;
+		this.purchaseOrderService = purchaseOrderService;
+		this.paymentRequestService = paymentRequestService;
 		this.approvalService = approvalService;
 	}
 
@@ -84,6 +96,19 @@ public class ProjectController {
 			@Valid @RequestBody CustomerContractRequest request
 	) {
 		return customerContractService.saveContract(projectId, request);
+	}
+
+	@PostMapping("/{projectId}/change-orders/executive-correction")
+	public ChangeOrderResponse correctAmountByExecutive(
+			@PathVariable("projectId") String projectId,
+			@Valid @RequestBody ExecutiveCorrectionRequest request
+	) {
+		return changeManagementService.correctByExecutive(projectId, request);
+	}
+
+	@GetMapping("/{projectId}/change-orders")
+	public List<ChangeOrderResponse> getChangeOrders(@PathVariable("projectId") String projectId) {
+		return changeManagementService.getHistory(projectId);
 	}
 
 	@PostMapping(path = "/{projectId}/contract-files", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
@@ -168,6 +193,17 @@ public class ProjectController {
 	@GetMapping("/{projectId}/progress-payments")
 	public ProgressPaymentResponse getProgressPayments(@PathVariable("projectId") String projectId) {
 		return progressPaymentService.getStatus(projectId);
+	}
+
+	@GetMapping("/{projectId}/purchase-orders")
+	public PurchaseOrderResponse getPurchaseOrders(@PathVariable("projectId") String projectId) {
+		return purchaseOrderService.getPurchaseOrders(projectId);
+	}
+
+	@PostMapping("/{projectId}/payment-requests")
+	@ResponseStatus(HttpStatus.CREATED)
+	public void requestPayments(@PathVariable("projectId") String projectId, @RequestBody PaymentRequestCreateRequest request) {
+		paymentRequestService.requestPayments(projectId, request);
 	}
 
 	@GetMapping("/{projectId}/settlement")

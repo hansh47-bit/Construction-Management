@@ -8,11 +8,13 @@ import com.construction.management.project.api.ProgressPaymentResponse.PurchaseO
 import com.construction.management.project.domain.ActualPayment;
 import com.construction.management.project.domain.ApprovalStatus;
 import com.construction.management.project.domain.PoChange;
+import com.construction.management.project.domain.PaymentRequest;
 import com.construction.management.project.domain.ProgressClaim;
 import com.construction.management.project.domain.Project;
 import com.construction.management.project.domain.PurchaseOrder;
 import com.construction.management.project.repository.ActualPaymentRepository;
 import com.construction.management.project.repository.PoChangeRepository;
+import com.construction.management.project.repository.PaymentRequestRepository;
 import com.construction.management.project.repository.ProgressClaimRepository;
 import com.construction.management.project.repository.ProjectRepository;
 import com.construction.management.project.repository.PurchaseOrderRepository;
@@ -34,14 +36,16 @@ public class ProgressPaymentService {
 	private final ProgressClaimRepository progressClaimRepository;
 	private final ActualPaymentRepository actualPaymentRepository;
 	private final ProjectSettlementService projectSettlementService;
+	private final PaymentRequestRepository paymentRequestRepository;
 
-	public ProgressPaymentService(ProjectRepository projectRepository, PurchaseOrderRepository purchaseOrderRepository, PoChangeRepository poChangeRepository, ProgressClaimRepository progressClaimRepository, ActualPaymentRepository actualPaymentRepository, ProjectSettlementService projectSettlementService) {
+	public ProgressPaymentService(ProjectRepository projectRepository, PurchaseOrderRepository purchaseOrderRepository, PoChangeRepository poChangeRepository, ProgressClaimRepository progressClaimRepository, ActualPaymentRepository actualPaymentRepository, ProjectSettlementService projectSettlementService, PaymentRequestRepository paymentRequestRepository) {
 		this.projectRepository = projectRepository;
 		this.purchaseOrderRepository = purchaseOrderRepository;
 		this.poChangeRepository = poChangeRepository;
 		this.progressClaimRepository = progressClaimRepository;
 		this.actualPaymentRepository = actualPaymentRepository;
 		this.projectSettlementService = projectSettlementService;
+		this.paymentRequestRepository = paymentRequestRepository;
 	}
 
 	@Transactional(readOnly = true)
@@ -108,19 +112,28 @@ public class ProgressPaymentService {
 		Map<String, List<ProgressClaim>> claimsByPo = claims.stream().collect(Collectors.groupingBy(ProgressClaim::getPoId));
 		List<String> claimIds = claims.stream().map(ProgressClaim::getClaimId).toList();
 		Map<String, List<ActualPayment>> paymentsByClaim = claimIds.isEmpty() ? Map.of() : actualPaymentRepository.findByClaimIdIn(claimIds).stream().collect(Collectors.groupingBy(ActualPayment::getClaimId));
+		Map<String, List<PaymentRequest>> paymentRequestsByPo = paymentRequestRepository.findByProjectId(project.getProjectId()).stream().collect(Collectors.groupingBy(PaymentRequest::getPoId));
 
-		return new ProgressPaymentResponse(project.getProjectId(), project.getProjectCode(), pos.stream().map(po -> {
+		List<PurchaseOrderStatus> purchaseOrderStatuses = pos.stream().map(po -> {
 			BigDecimal currentPo = defaultZero(po.getInitialPoAmount()).add(poChanges.getOrDefault(po.getPoId(), BigDecimal.ZERO));
 			List<ProgressClaim> poClaims = claimsByPo.getOrDefault(po.getPoId(), List.of()).stream().sorted(Comparator.comparing(ProgressClaim::getDegree)).toList();
 			BigDecimal approvedClaimTotal = poClaims.stream().filter(claim -> claim.getApprovalStatus() == ApprovalStatus.APPROVED).map(ProgressClaim::getClaimAmount).reduce(BigDecimal.ZERO, BigDecimal::add);
 			BigDecimal paidTotal = poClaims.stream().flatMap(claim -> paymentsByClaim.getOrDefault(claim.getClaimId(), List.of()).stream()).map(ActualPayment::getPaidAmount).reduce(BigDecimal.ZERO, BigDecimal::add);
-			return new PurchaseOrderStatus(po.getPoId(), po.getVendorName(), currentPo, approvedClaimTotal, paidTotal, currentPo.subtract(approvedClaimTotal), approvedClaimTotal.subtract(paidTotal), currentPo.subtract(paidTotal), poClaims.stream().map(claim -> {
+			String paymentRequestStatus = paymentRequestsByPo.getOrDefault(po.getPoId(), List.of()).stream()
+					.map(PaymentRequest::getApprovalStatus)
+					.filter(status -> ApprovalStatus.REQUESTED.name().equals(status))
+					.findFirst()
+					.orElse(approvedClaimTotal.subtract(paidTotal).signum() <= 0 ? "PAID" : "READY");
+			return new PurchaseOrderStatus(po.getPoId(), po.getVendorName(), currentPo, approvedClaimTotal, paidTotal, currentPo.subtract(approvedClaimTotal), approvedClaimTotal.subtract(paidTotal), currentPo.subtract(paidTotal), paymentRequestStatus, poClaims.stream().map(claim -> {
 				List<ActualPayment> payments = paymentsByClaim.getOrDefault(claim.getClaimId(), List.of());
 				BigDecimal claimPaid = payments.stream().map(ActualPayment::getPaidAmount).reduce(BigDecimal.ZERO, BigDecimal::add);
-				String paymentState = claim.getApprovalStatus() == ApprovalStatus.REQUESTED ? "REQUESTED" : claimPaid.compareTo(claim.getClaimAmount()) >= 0 ? "PAID" : "WAITING_FOR_PAYMENT";
+				String paymentState = claim.getApprovalStatus() == ApprovalStatus.REQUESTED ? "REQUESTED" : claimPaid.compareTo(claim.getClaimAmount()) >= 0 ? "PAID" : ApprovalStatus.REQUESTED.name().equals(paymentRequestStatus) ? "PAYMENT_APPROVAL_REQUESTED" : "WAITING_FOR_PAYMENT";
 				return new ClaimStatus(claim.getClaimId(), claim.getDegree(), claim.getClaimAmount(), claim.getApprovalStatus().name(), paymentState, claimPaid, claim.getClaimAmount().subtract(claimPaid), payments.stream().map(payment -> new PaymentStatus(payment.getPaymentId(), payment.getPaidAmount(), payment.getPaidDate(), payment.getPaymentStatus(), payment.getAccountInfo(), payment.getReceiptLink())).toList());
 			}).toList());
-		}).toList());
+		}).toList();
+		long pendingPaymentApprovalCount = purchaseOrderStatuses.stream().filter(po -> ApprovalStatus.REQUESTED.name().equals(po.paymentRequestStatus())).count();
+		boolean allPaymentsApproved = !purchaseOrderStatuses.isEmpty() && purchaseOrderStatuses.stream().allMatch(po -> po.totalUnpaidBalance().signum() == 0);
+		return new ProgressPaymentResponse(project.getProjectId(), project.getProjectCode(), allPaymentsApproved, pendingPaymentApprovalCount, purchaseOrderStatuses);
 	}
 
 	private Project getProject(String projectId) {

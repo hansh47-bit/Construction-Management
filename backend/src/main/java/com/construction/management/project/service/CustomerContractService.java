@@ -5,9 +5,12 @@ import com.construction.management.project.api.CustomerContractResponse;
 import com.construction.management.project.api.CustomerContractResponse.FileResponse;
 import com.construction.management.project.api.CustomerContractResponse.Item;
 import com.construction.management.project.domain.ContractFile;
+import com.construction.management.project.domain.ContractChange;
+import com.construction.management.project.domain.ApprovalStatus;
 import com.construction.management.project.domain.CustomerContractItem;
 import com.construction.management.project.domain.Project;
 import com.construction.management.project.repository.ContractFileRepository;
+import com.construction.management.project.repository.ContractChangeRepository;
 import com.construction.management.project.repository.CustomerContractItemRepository;
 import com.construction.management.project.repository.ProjectRepository;
 import jakarta.persistence.EntityNotFoundException;
@@ -32,17 +35,20 @@ public class CustomerContractService {
 	private final ProjectRepository projectRepository;
 	private final CustomerContractItemRepository itemRepository;
 	private final ContractFileRepository fileRepository;
+	private final ContractChangeRepository contractChangeRepository;
 	private final Path uploadRoot;
 
 	public CustomerContractService(
 			ProjectRepository projectRepository,
 			CustomerContractItemRepository itemRepository,
 			ContractFileRepository fileRepository,
+			ContractChangeRepository contractChangeRepository,
 			@Value("${app.contract-file.upload-dir:uploads/contracts}") String uploadDir
 	) {
 		this.projectRepository = projectRepository;
 		this.itemRepository = itemRepository;
 		this.fileRepository = fileRepository;
+		this.contractChangeRepository = contractChangeRepository;
 		this.uploadRoot = Path.of(uploadDir).toAbsolutePath().normalize();
 	}
 
@@ -137,7 +143,11 @@ public class CustomerContractService {
 				.map(CustomerContractService::defaultZero)
 				.reduce(BigDecimal.ZERO, BigDecimal::add);
 		BigDecimal totalWithVat = totalSupply.add(totalVat);
-		BigDecimal targetCostLimit = totalSupply
+		BigDecimal approvedChanges = contractChangeRepository.findByProjectIdAndApprovalStatus(project.getProjectId(), ApprovalStatus.APPROVED).stream()
+				.map(ContractChange::getChangeAmount).map(CustomerContractService::defaultZero).reduce(BigDecimal.ZERO, BigDecimal::add);
+		BigDecimal currentSupply = totalSupply.add(approvedChanges);
+		BigDecimal currentWithVat = totalWithVat.add(approvedChanges);
+		BigDecimal targetCostLimit = currentSupply
 				.multiply(BigDecimal.ONE.subtract(defaultZero(project.getTargetProfitRate()).divide(BigDecimal.valueOf(100), 6, RoundingMode.HALF_UP)))
 				.setScale(0, RoundingMode.HALF_UP);
 
@@ -148,8 +158,10 @@ public class CustomerContractService {
 				project.getClientName(),
 				project.getTargetProfitRate(),
 				totalSupply,
+				currentSupply,
 				totalVat,
 				totalWithVat,
+				currentWithVat,
 				targetCostLimit,
 				items.stream().map(item -> new Item(
 						item.getItemId(),

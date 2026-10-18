@@ -4,12 +4,17 @@ import com.construction.management.project.api.PurchaseOrderDraftResponse;
 import com.construction.management.project.api.VendorComparisonRequest;
 import com.construction.management.project.api.VendorComparisonResponse;
 import com.construction.management.project.domain.PoRequisition;
+import com.construction.management.project.domain.ApprovalStatus;
+import com.construction.management.project.domain.BudgetChange;
 import com.construction.management.project.domain.Project;
 import com.construction.management.project.domain.ProjectExecutionBudgetItem;
+import com.construction.management.project.domain.PurchaseOrder;
 import com.construction.management.project.domain.VendorComparison;
 import com.construction.management.project.repository.PoRequisitionRepository;
+import com.construction.management.project.repository.BudgetChangeRepository;
 import com.construction.management.project.repository.ProjectExecutionBudgetItemRepository;
 import com.construction.management.project.repository.ProjectRepository;
+import com.construction.management.project.repository.PurchaseOrderRepository;
 import com.construction.management.project.repository.VendorComparisonRepository;
 import jakarta.persistence.EntityNotFoundException;
 import java.math.BigDecimal;
@@ -25,16 +30,20 @@ public class VendorComparisonService {
 	private final ProjectExecutionBudgetItemRepository budgetItemRepository;
 	private final VendorComparisonRepository comparisonRepository;
 	private final PoRequisitionRepository requisitionRepository;
+	private final PurchaseOrderRepository purchaseOrderRepository;
 	private final ProjectSettlementService projectSettlementService;
 	private final ApprovalService approvalService;
+	private final BudgetChangeRepository budgetChangeRepository;
 
-	public VendorComparisonService(ProjectRepository projectRepository, ProjectExecutionBudgetItemRepository budgetItemRepository, VendorComparisonRepository comparisonRepository, PoRequisitionRepository requisitionRepository, ProjectSettlementService projectSettlementService, ApprovalService approvalService) {
+	public VendorComparisonService(ProjectRepository projectRepository, ProjectExecutionBudgetItemRepository budgetItemRepository, VendorComparisonRepository comparisonRepository, PoRequisitionRepository requisitionRepository, PurchaseOrderRepository purchaseOrderRepository, ProjectSettlementService projectSettlementService, ApprovalService approvalService, BudgetChangeRepository budgetChangeRepository) {
 		this.projectRepository = projectRepository;
 		this.budgetItemRepository = budgetItemRepository;
 		this.comparisonRepository = comparisonRepository;
 		this.requisitionRepository = requisitionRepository;
+		this.purchaseOrderRepository = purchaseOrderRepository;
 		this.projectSettlementService = projectSettlementService;
 		this.approvalService = approvalService;
+		this.budgetChangeRepository = budgetChangeRepository;
 	}
 
 	@Transactional(readOnly = true)
@@ -49,6 +58,11 @@ public class VendorComparisonService {
 		projectSettlementService.assertNotSettled(projectId);
 		Project project = getProject(projectId);
 		ProjectExecutionBudgetItem item = getItem(itemId);
+		requisitionRepository.findTopByProjectIdAndExecutionItemIdOrderByCreatedAtDesc(projectId, itemId)
+				.filter(requisition -> ApprovalStatus.REQUESTED.name().equals(requisition.getApprovalStatus()) || ApprovalStatus.APPROVED.name().equals(requisition.getApprovalStatus()))
+				.ifPresent(requisition -> {
+					throw new IllegalStateException("결재 대기 또는 승인 완료 발주품의는 수정할 수 없습니다.");
+				});
 		if (!item.isApproved()) {
 			throw new IllegalStateException("실행예산 승인 후 발주품의를 요청할 수 있습니다.");
 		}
@@ -92,7 +106,8 @@ public class VendorComparisonService {
 		ProjectExecutionBudgetItem item = getItem(itemId);
 		VendorComparison selected = comparisonRepository.findByProjectIdAndExecutionItemIdAndSelectedTrue(projectId, itemId)
 				.orElseThrow(() -> new EntityNotFoundException("선정된 비교견적이 없습니다."));
-		return toDraft(project, item, selected, "DRAFT");
+		PoRequisition requisition = requisitionRepository.findTopByProjectIdAndExecutionItemIdOrderByCreatedAtDesc(projectId, itemId).orElse(null);
+		return toDraft(project, item, selected, requisition);
 	}
 
 	@Transactional
@@ -114,7 +129,7 @@ public class VendorComparisonService {
 		if (!requisitionRepository.findByProjectIdAndExecutionItemIdAndApprovalStatus(projectId, itemId, "APPROVED").isEmpty()) {
 			throw new IllegalArgumentException("이미 승인된 발주품의가 있습니다.");
 		}
-		BigDecimal approvedBudget = item.getApprovedBudgetAmount() == null ? item.getBudgetAmount() : item.getApprovedBudgetAmount();
+		BigDecimal approvedBudget = currentBudgetAmount(item);
 		BigDecimal variance = selected.getQuotedAmount().subtract(approvedBudget);
 		PoRequisition requisition = new PoRequisition(
 				"REQ-PO-" + UUID.randomUUID().toString().substring(0, 8),
@@ -129,11 +144,11 @@ public class VendorComparisonService {
 		);
 		requisitionRepository.save(requisition);
 		approvalService.createPurchaseOrderApproval(project, item, requisition, selected.getSelectionReason());
-		return toDraft(project, item, selected, "REQUESTED");
+		return toDraft(project, item, selected, requisition);
 	}
 
 	private VendorComparisonResponse toResponse(Project project, ProjectExecutionBudgetItem item) {
-		BigDecimal budgetAmount = item.getApprovedBudgetAmount() == null ? item.getBudgetAmount() : item.getApprovedBudgetAmount();
+		BigDecimal budgetAmount = currentBudgetAmount(item);
 		return new VendorComparisonResponse(
 				project.getProjectId(),
 				project.getProjectCode(),
@@ -160,12 +175,20 @@ public class VendorComparisonService {
 		);
 	}
 
-	private PurchaseOrderDraftResponse toDraft(Project project, ProjectExecutionBudgetItem item, VendorComparison selected, String status) {
-		BigDecimal budgetAmount = item.getApprovedBudgetAmount() == null ? item.getBudgetAmount() : item.getApprovedBudgetAmount();
+	private PurchaseOrderDraftResponse toDraft(Project project, ProjectExecutionBudgetItem item, VendorComparison selected, PoRequisition requisition) {
+		BigDecimal budgetAmount = currentBudgetAmount(item);
 		BigDecimal variance = selected.getQuotedAmount().subtract(budgetAmount);
 		String varianceType = variance.signum() > 0 ? "OVER" : variance.signum() < 0 ? "SAVING" : "EVEN";
 		String color = variance.signum() > 0 ? "RED" : variance.signum() < 0 ? "BLUE" : "DARK";
-		return new PurchaseOrderDraftResponse(project.getProjectCode(), item.getItemId(), item.getCategoryName(), item.getItemName(), budgetAmount, selected.getVendorName(), selected.getQuotedAmount(), variance, varianceType, color, selected.getSelectionReason(), status);
+		PurchaseOrder purchaseOrder = requisition == null ? null : purchaseOrderRepository.findByRequisitionId(requisition.getRequisitionId()).orElse(null);
+		return new PurchaseOrderDraftResponse(
+				project.getProjectCode(), item.getItemId(), item.getCategoryName(), item.getItemName(), budgetAmount,
+				selected.getVendorName(), selected.getQuotedAmount(), variance, varianceType, color, selected.getSelectionReason(),
+				requisition == null ? "DRAFT" : requisition.getApprovalStatus(),
+				purchaseOrder == null ? null : purchaseOrder.getPoId(),
+				purchaseOrder == null ? null : purchaseOrder.getApprovedAt(),
+				purchaseOrder == null ? null : purchaseOrder.getApprover()
+		);
 	}
 
 	private Project getProject(String projectId) {
@@ -178,5 +201,12 @@ public class VendorComparisonService {
 
 	private String nextComparisonCode(String itemId) {
 		return "CMP-" + itemId.replace("EX-", "") + "-" + UUID.randomUUID().toString().substring(0, 4).toUpperCase();
+	}
+
+	private BigDecimal currentBudgetAmount(ProjectExecutionBudgetItem item) {
+		BigDecimal original = item.getApprovedBudgetAmount() == null ? item.getBudgetAmount() : item.getApprovedBudgetAmount();
+		BigDecimal changes = budgetChangeRepository.findByBudgetIdInAndApprovalStatus(List.of(item.getItemId()), ApprovalStatus.APPROVED).stream()
+				.map(BudgetChange::getChangeAmount).reduce(BigDecimal.ZERO, BigDecimal::add);
+		return original.add(changes);
 	}
 }

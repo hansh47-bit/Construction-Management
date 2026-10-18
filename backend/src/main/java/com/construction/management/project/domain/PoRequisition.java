@@ -106,4 +106,7 @@ public class PoRequisition {
 	public String getSelectionReason() { return selectionReason; }
 	public String getApprovalStatus() { return approvalStatus; }
 	public String getApprovalId() { return approvalId; }
+	public String getApprover() { return approver; }
+	public String getComment() { return comment; }
+	public LocalDateTime getDecidedAt() { return decidedAt; }
 }
