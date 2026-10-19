@@ -178,8 +178,8 @@ public class ExecutionBudgetDetailService {
 				targetCostLimit.compareTo(BigDecimal.ZERO) > 0 && totalDetailAmount.compareTo(targetCostLimit) > 0,
 				items.stream()
 						.sorted(Comparator.comparing(ProjectExecutionBudgetItem::getItemId))
-				.map(item -> new SummaryItem(ProjectExecutionBudgetItem.budgetItemId(project.getProjectId(), item.getItemId()), item.getCategoryName(), item.getItemName(),
-								item.isApproved() ? defaultZero(item.getApprovedBudgetAmount()).add(changesByItem.getOrDefault(item.getItemId(), BigDecimal.ZERO)) : item.getBudgetAmount()))
+				.map(item -> new SummaryItem(ProjectExecutionBudgetItem.budgetItemId(project.getProjectId(), item.getItemId()), item.getCategoryName(), item.getItemName(), item.getApprovalStatus(),
+						item.isApproved() ? defaultZero(item.getApprovedBudgetAmount()).add(changesByItem.getOrDefault(item.getItemId(), BigDecimal.ZERO)) : item.getBudgetAmount()))
 						.toList(),
 				details.stream()
 						.map(detail -> new Detail(

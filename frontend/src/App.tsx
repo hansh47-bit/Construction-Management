@@ -127,6 +127,7 @@ type ExecutionBudgetSummaryItem = {
   budget_item_id: string
   category_name: string
   item_name: string
+  approval_status: string
   rolled_up_amount: number
 }
 
@@ -1201,6 +1202,7 @@ function App() {
         budget_item_id: detail.budget_item_id,
         category_name: detail.category_name,
         item_name: detail.item_name,
+		approval_status: executionBudget?.approval_status ?? 'DRAFT',
         rolled_up_amount: 0,
       }
       current.category_name = detail.category_name
@@ -1209,7 +1211,7 @@ function App() {
       summary.set(detail.budget_item_id, current)
     })
     return [...summary.values()].sort((a, b) => a.budget_item_id.localeCompare(b.budget_item_id))
-  }, [executionDetails])
+	}, [executionBudget?.approval_status, executionDetails])
 
   return (
     <main className="min-h-screen bg-[#f5f7fb] text-slate-900">
@@ -2414,10 +2416,12 @@ function VendorComparisonPanel({
   removeVendorComparison: (index: number) => void
   openPurchaseOrderHistory: () => void
 }) {
+	const approvedItems = executionBudget.summary_by_item.filter((item) => item.approval_status === 'APPROVED')
+	const hasApprovedItems = approvedItems.length > 0
   const selected = comparisons.find((comparison) => comparison.is_selected)
   const approvedBudget = vendorComparison.approved_execution_budget || 0
   const isPurchaseOrderLocked = purchaseOrderDraft?.approval_status === 'REQUESTED' || purchaseOrderDraft?.approval_status === 'APPROVED'
-  const canRequestPurchaseOrder = executionBudget.approval_status === 'APPROVED' && !!selected && !isPurchaseOrderLocked
+  const canRequestPurchaseOrder = hasApprovedItems && !!selected && !isPurchaseOrderLocked
 
   return (
     <div>
@@ -2427,7 +2431,7 @@ function VendorComparisonPanel({
           <p className="mt-1 text-sm text-slate-500">승인 실행예산을 기준으로 업체 견적을 비교하고 선정 업체를 발주품의로 연결합니다.</p>
         </div>
         <div className="flex flex-wrap gap-2">
-          <button type="button" onClick={saveVendorComparisons} disabled={isPurchaseOrderLocked} className="inline-flex items-center gap-2 rounded-md bg-slate-900 px-4 py-2 text-sm font-semibold text-white hover:bg-slate-800 disabled:cursor-not-allowed disabled:bg-slate-300">
+          <button type="button" onClick={saveVendorComparisons} disabled={!hasApprovedItems || isPurchaseOrderLocked} className="inline-flex items-center gap-2 rounded-md bg-slate-900 px-4 py-2 text-sm font-semibold text-white hover:bg-slate-800 disabled:cursor-not-allowed disabled:bg-slate-300">
             <Save className="h-4 w-4" aria-hidden="true" />
             비교견적 저장
           </button>
@@ -2437,11 +2441,14 @@ function VendorComparisonPanel({
         </div>
       </div>
 
+		{!hasApprovedItems && (
+			<p className="border-b border-slate-200 py-5 text-sm text-slate-500">승인된 세부실행예산 항목이 있어야 업체 비교견적을 작성할 수 있습니다.</p>
+		)}
       <div className="grid gap-4 border-b border-slate-200 py-5 lg:grid-cols-[260px_1fr_1fr]">
         <label className="block text-sm font-semibold text-slate-700">
           실행항목ID
           <select value={selectedExecutionItemId} onChange={(event) => setSelectedExecutionItemId(event.target.value)} className="input mt-2">
-            {executionBudget.summary_by_item.map((item) => (
+            {approvedItems.map((item) => (
               <option key={item.budget_item_id} value={item.budget_item_id}>
                 {item.budget_item_id} · {item.item_name}
               </option>

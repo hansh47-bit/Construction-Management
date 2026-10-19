@@ -38,6 +38,8 @@ public record ExecutionBudgetDetailResponse(
 			String categoryName,
 			@JsonProperty("item_name")
 			String itemName,
+			@JsonProperty("approval_status")
+			String approvalStatus,
 			@JsonProperty("rolled_up_amount")
 			BigDecimal rolledUpAmount
 	) {
