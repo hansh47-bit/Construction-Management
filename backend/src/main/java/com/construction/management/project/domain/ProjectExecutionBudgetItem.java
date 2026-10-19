@@ -12,6 +12,7 @@ import java.time.LocalDateTime;
 @Entity
 @Table(name = "project_execution_budget_items")
 public class ProjectExecutionBudgetItem {
+	private static final String PROJECT_ITEM_SEPARATOR = "::";
 
 	@Id
 	@Column(name = "item_id", nullable = false, length = 64)
@@ -143,5 +144,14 @@ public class ProjectExecutionBudgetItem {
 
 	public boolean isApproved() {
 		return ApprovalStatus.APPROVED.name().equals(approvalStatus);
+	}
+
+	public static String storageId(String projectId, String budgetItemId) {
+		return projectId + PROJECT_ITEM_SEPARATOR + budgetItemId;
+	}
+
+	public static String budgetItemId(String projectId, String storageId) {
+		String prefix = projectId + PROJECT_ITEM_SEPARATOR;
+		return storageId != null && storageId.startsWith(prefix) ? storageId.substring(prefix.length()) : storageId;
 	}
 }

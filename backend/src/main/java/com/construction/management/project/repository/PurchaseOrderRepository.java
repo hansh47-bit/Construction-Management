@@ -11,4 +11,6 @@ public interface PurchaseOrderRepository extends JpaRepository<PurchaseOrder, St
 	Optional<PurchaseOrder> findByRequisitionId(String requisitionId);
 	List<PurchaseOrder> findByPoIdStartingWithOrderByPoIdDesc(String poIdPrefix);
 	boolean existsByProjectIdAndBudgetId(String projectId, String budgetId);
+	boolean existsByProjectId(String projectId);
+	void deleteByProjectId(String projectId);
 }

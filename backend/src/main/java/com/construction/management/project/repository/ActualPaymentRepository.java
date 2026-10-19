@@ -7,4 +7,5 @@ import org.springframework.data.jpa.repository.JpaRepository;
 public interface ActualPaymentRepository extends JpaRepository<ActualPayment, String> {
 	List<ActualPayment> findByClaimIdIn(List<String> claimIds);
 	List<ActualPayment> findByClaimId(String claimId);
+	void deleteByClaimIdIn(List<String> claimIds);
 }

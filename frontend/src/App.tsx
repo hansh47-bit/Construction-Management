@@ -254,7 +254,18 @@ type ApprovalItem = {
   comment?: string
   requested_at?: string
   decided_at?: string
+  cancelled_by?: string
+  cancellation_reason?: string
+  cancelled_at?: string
   detail?: unknown
+  attachments?: ApprovalAttachment[]
+}
+
+type ApprovalAttachment = {
+  attachment_id: string
+  file_name: string
+  content_type?: string
+  download_url: string
 }
 
 type PaymentStatus = {
@@ -377,6 +388,12 @@ function formatDate(value: string | undefined) {
   return value || '-'
 }
 
+function formatDateTime(value: string | undefined) {
+  if (!value) return '-'
+  const [date, time] = value.replace('T', ' ').split(' ')
+  return time ? `${formatDate(date)} ${time.slice(0, 5)}` : formatDate(date)
+}
+
 function toNumber(value: string) {
   const normalized = value.replaceAll(',', '')
   return Number(normalized || 0)
@@ -434,6 +451,7 @@ function App() {
   const [contractItems, setContractItems] = useState<CustomerContractItem[]>([])
   const [executionBudget, setExecutionBudget] = useState<ExecutionBudgetDetailResponse | null>(null)
   const [executionDetails, setExecutionDetails] = useState<ExecutionBudgetDetail[]>([])
+  const [executionBudgetApprovalFiles, setExecutionBudgetApprovalFiles] = useState<File[]>([])
   const [selectedExecutionItemId, setSelectedExecutionItemId] = useState('EX-001')
   const [vendorComparison, setVendorComparison] = useState<VendorComparisonResponse | null>(null)
   const [vendorComparisons, setVendorComparisons] = useState<VendorComparisonItem[]>([])
@@ -476,6 +494,7 @@ function App() {
       setContractItems([])
       setExecutionBudget(null)
       setExecutionDetails([])
+      setExecutionBudgetApprovalFiles([])
       setVendorComparison(null)
       setVendorComparisons([])
       setPurchaseOrderDraft(null)
@@ -589,6 +608,31 @@ function App() {
     setSelectedProjectId(null)
   }
 
+  async function deleteProject(project: Project) {
+    const confirmed = window.confirm(
+      `“${project.project_name}” 프로젝트와 연결된 계약·예산·발주·기성·지급·결재·변경 데이터를 모두 영구 삭제할까요?\n정산완료 프로젝트만 삭제할 수 없습니다.`,
+    )
+    if (!confirmed) {
+      return
+    }
+
+    const response = await fetch(apiUrl(`/api/v1/projects/${project.project_id}`), {
+      method: 'DELETE',
+    })
+
+    if (!response.ok) {
+      const body = await response.json().catch(() => null) as { detail?: string; message?: string } | null
+      setError(body?.detail ?? body?.message ?? `프로젝트 삭제 실패: ${response.status}`)
+      return
+    }
+
+    setError(null)
+    if (selectedProjectId === project.project_id) {
+      setSelectedProjectId(null)
+    }
+    await loadProjects(keyword)
+  }
+
   async function loadCustomerContract(projectId: string) {
     try {
       const response = await fetch(apiUrl(`/api/v1/projects/${projectId}/contracts`))
@@ -694,7 +738,7 @@ function App() {
     }
     const payload = {
       details: executionDetails
-        .filter((detail) => detail.budget_item_id.trim() && detail.category_name.trim() && detail.item_name.trim())
+        .filter((detail) => detail.budget_item_id.trim() && detail.category_name.trim())
         .map((detail) => ({
           budget_item_id: detail.budget_item_id,
           category_name: detail.category_name,
@@ -772,16 +816,21 @@ function App() {
 
   async function requestExecutionBudgetApproval() {
     if (!selectedProjectId) return
+    const formData = new FormData()
+    formData.append('request', new Blob([
+      JSON.stringify({ request_user: 'system', request_reason: '최초 실행예산 승인 요청' }),
+    ], { type: 'application/json' }))
+    executionBudgetApprovalFiles.forEach((file) => formData.append('files', file))
     const response = await fetch(apiUrl(`/api/v1/projects/${selectedProjectId}/execution-budget-details/request-approval`), {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ request_user: 'system', request_reason: '최초 실행예산 승인 요청' }),
+      body: formData,
     })
     if (!response.ok) {
       setError(`실행예산 결재요청 실패: ${response.status}`)
       return
     }
     await response.json()
+    setExecutionBudgetApprovalFiles([])
     await loadExecutionBudgetDetails(selectedProjectId)
     await loadApprovals()
   }
@@ -811,11 +860,14 @@ function App() {
     setSelectedApproval(await response.json())
   }
 
-  async function decideApproval(approvalId: string, decision: 'approve' | 'reject') {
+  async function decideApproval(approvalId: string, decision: 'approve' | 'reject' | 'cancel') {
+    if (decision === 'cancel' && !window.confirm('승인 완료된 실행예산을 승인취소하고 재작업 상태로 전환할까요? 기존 승인 이력은 보존됩니다.')) {
+      return
+    }
     const response = await fetch(apiUrl(`/api/v1/approvals/${approvalId}/${decision}`), {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ approver: '대표', comment: decision === 'reject' ? rejectComment : '승인' }),
+      body: JSON.stringify({ approver: '대표', comment: decision === 'approve' ? '승인' : rejectComment }),
     })
     if (!response.ok) {
       setError(`결재 처리 실패: ${response.status}`)
@@ -1229,6 +1281,7 @@ function App() {
               setActiveTab('고객 견적·계약 관리')
               setSelectedProjectId(projectId)
             }}
+            onDelete={deleteProject}
           />
         ) : (
           <section className="rounded-md border border-slate-200 bg-white p-4 shadow-sm">
@@ -1350,6 +1403,9 @@ function App() {
                     totalAmount={executionTotal}
                     saveExecutionBudgetDetails={saveExecutionBudgetDetails}
                     requestExecutionBudgetApproval={requestExecutionBudgetApproval}
+                    approvalFiles={executionBudgetApprovalFiles}
+                    setApprovalFiles={setExecutionBudgetApprovalFiles}
+                    contractFiles={contract?.files ?? []}
                     updateExecutionDetail={updateExecutionDetail}
                     addExecutionDetail={addExecutionDetail}
                     removeExecutionDetail={removeExecutionDetail}
@@ -1423,6 +1479,7 @@ function App() {
               loadApprovalDetail={loadApprovalDetail}
               approveApproval={(approvalId) => decideApproval(approvalId, 'approve')}
               rejectApproval={(approvalId) => decideApproval(approvalId, 'reject')}
+              cancelApproval={(approvalId) => decideApproval(approvalId, 'cancel')}
             />
           </section>
         )}
@@ -1457,11 +1514,13 @@ function ProjectList({
   keyword,
   setKeyword,
   onSelect,
+  onDelete,
 }: {
   projects: Project[]
   keyword: string
   setKeyword: (value: string) => void
   onSelect: (projectId: string) => void
+  onDelete: (project: Project) => void
 }) {
   return (
     <section className="rounded-md border border-slate-200 bg-white shadow-sm">
@@ -1484,6 +1543,7 @@ function ProjectList({
         <table className="min-w-[1320px] w-full text-left text-sm">
           <thead className="bg-slate-50 text-xs font-semibold uppercase text-slate-500">
             <tr>
+              <th className="px-4 py-3">관리</th>
               <th className="px-4 py-3">프로젝트명(프로젝트번호)</th>
               <th className="px-4 py-3">고객/발주처</th>
               <th className="px-4 py-3">현장주소</th>
@@ -1498,7 +1558,7 @@ function ProjectList({
           <tbody className="divide-y divide-slate-100">
             {projects.length === 0 ? (
               <tr>
-                <td colSpan={9} className="px-4 py-8 text-center text-slate-500">
+                <td colSpan={10} className="px-4 py-8 text-center text-slate-500">
                   등록된 프로젝트가 없습니다.
                 </td>
               </tr>
@@ -1509,6 +1569,21 @@ function ProjectList({
                   onClick={() => onSelect(project.project_id)}
                   className="cursor-pointer hover:bg-cyan-50"
                 >
+                  <td className="px-4 py-3">
+                    <button
+                      type="button"
+                      onClick={(event) => {
+                        event.stopPropagation()
+                        onDelete(project)
+                      }}
+                      disabled={project.status === '정산완료'}
+                      className="inline-flex items-center gap-1 rounded-md border border-rose-200 px-2.5 py-1.5 text-xs font-semibold text-rose-700 hover:bg-rose-50 disabled:cursor-not-allowed disabled:border-slate-200 disabled:text-slate-400 disabled:hover:bg-transparent"
+                      aria-label={`${project.project_name} 삭제`}
+                    >
+                      <Trash2 className="h-3.5 w-3.5" aria-hidden="true" />
+                      {project.status === '정산완료' ? '정산완료' : '삭제'}
+                    </button>
+                  </td>
                   <td className="px-4 py-3">
                     <p className="font-semibold text-slate-950">{project.project_name}</p>
                     <p className="mt-1 text-xs text-slate-500">{project.project_code}</p>
@@ -1759,6 +1834,9 @@ function ExecutionBudgetDetailPanel({
   totalAmount,
   saveExecutionBudgetDetails,
   requestExecutionBudgetApproval,
+  approvalFiles,
+  setApprovalFiles,
+  contractFiles,
   updateExecutionDetail,
   addExecutionDetail,
   removeExecutionDetail,
@@ -1769,6 +1847,9 @@ function ExecutionBudgetDetailPanel({
   totalAmount: number
   saveExecutionBudgetDetails: () => void
   requestExecutionBudgetApproval: () => void
+  approvalFiles: File[]
+  setApprovalFiles: (files: File[]) => void
+  contractFiles: ContractFile[]
   updateExecutionDetail: (index: number, field: keyof ExecutionBudgetDetail, value: string) => void
   addExecutionDetail: (copyIndex?: number) => void
   removeExecutionDetail: (index: number) => void
@@ -1811,6 +1892,30 @@ function ExecutionBudgetDetailPanel({
           accent={executionBudget.over_target_limit || displayedBudgetAmount > executionBudget.target_cost_limit ? 'text-rose-700' : 'text-cyan-700'}
         />
       </div>
+
+      {contractFiles.length > 0 && (
+        <div className="border-b border-slate-200 py-5">
+          <h3 className="text-sm font-semibold text-slate-900">계약관리 첨부파일</h3>
+          <p className="mt-1 text-sm text-slate-500">계약관리에서 등록한 견적서·계약서를 내려받을 수 있습니다.</p>
+          <div className="mt-3 divide-y rounded-md border border-slate-200 bg-white">
+            {contractFiles.map((file) => (
+              <a
+                key={file.file_id}
+                href={apiUrl(`${file.download_url}${file.download_url.includes('?') ? '&' : '?'}source=execution-budget`)}
+                className="flex items-center justify-between gap-3 px-4 py-3 text-sm hover:bg-slate-50"
+              >
+                <span>
+                  <span className="font-semibold text-slate-900">{file.file_name}</span>
+                  <span className="ml-2 rounded-full bg-slate-100 px-2 py-0.5 text-xs font-semibold text-slate-600">
+                    {file.file_type}
+                  </span>
+                </span>
+                <Download className="h-4 w-4 shrink-0 text-slate-400" aria-hidden="true" />
+              </a>
+            ))}
+          </div>
+        </div>
+      )}
 
       {(executionBudget.over_target_limit || displayedBudgetAmount > executionBudget.target_cost_limit) && executionBudget.target_cost_limit > 0 && (
         <div className="mt-4 flex items-start gap-3 rounded-md border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-800">
@@ -1861,6 +1966,7 @@ function ExecutionBudgetDetailPanel({
           <table className="min-w-[1640px] text-left text-sm">
             <thead className="bg-slate-50 text-xs font-semibold uppercase text-slate-500">
               <tr>
+				<th className="px-3 py-3">순번</th>
                 <th className="px-3 py-3">No</th>
                 <th className="px-3 py-3">프로젝트</th>
                 <th className="px-3 py-3">실행항목ID</th>
@@ -1968,6 +2074,25 @@ function ExecutionBudgetDetailPanel({
             </div>
           </div>
         )}
+        <div className="mt-4 flex flex-wrap items-center gap-2">
+          <label className="inline-flex cursor-pointer items-center gap-2 rounded-md border border-slate-300 px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50 has-[:disabled]:cursor-not-allowed has-[:disabled]:opacity-50">
+            <Upload className="h-4 w-4" aria-hidden="true" />
+            결재 첨부파일 선택
+            <input
+              type="file"
+              multiple
+              disabled={isLocked}
+              className="hidden"
+              onChange={(event) => {
+                setApprovalFiles(Array.from(event.target.files ?? []))
+                event.currentTarget.value = ''
+              }}
+            />
+          </label>
+          {approvalFiles.length > 0 && (
+            <span className="text-sm text-slate-600">{approvalFiles.map((file) => file.name).join(', ')}</span>
+          )}
+        </div>
         <button
           type="button"
           onClick={requestExecutionBudgetApproval}
@@ -2572,6 +2697,7 @@ function ApprovalInboxPanel({
   loadApprovalDetail,
   approveApproval,
   rejectApproval,
+  cancelApproval,
 }: {
   approvals: ApprovalItem[]
   selectedApproval: ApprovalItem | null
@@ -2584,8 +2710,11 @@ function ApprovalInboxPanel({
   loadApprovalDetail: (approvalId: string) => void
   approveApproval: (approvalId: string) => void
   rejectApproval: (approvalId: string) => void
+  cancelApproval: (approvalId: string) => void
 }) {
   const pending = selectedApproval?.status === 'REQUESTED'
+  const canCancelApprovedExecutionBudget = selectedApproval?.status === 'APPROVED'
+    && selectedApproval.approval_type === 'EXECUTION_BUDGET'
 
   return (
     <div>
@@ -2600,6 +2729,7 @@ function ApprovalInboxPanel({
             <option value="REQUESTED">결재대기</option>
             <option value="APPROVED">승인</option>
             <option value="REJECTED">반려</option>
+            <option value="CANCELLED">승인취소</option>
           </select>
           <select value={typeFilter} onChange={(event) => setTypeFilter(event.target.value)} className="input w-44">
             <option value="">전체 유형</option>
@@ -2625,9 +2755,10 @@ function ApprovalInboxPanel({
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100">
-              {approvals.map((approval) => (
+              {approvals.map((approval, index) => (
                 <tr key={approval.approval_id}>
-                  <td className="px-3 py-3 text-slate-600">{formatDate(approval.requested_at?.slice(0, 10))}</td>
+				  <td className="px-3 py-3 text-slate-500">{index + 1}</td>
+                  <td className="px-3 py-3 text-slate-600">{formatDateTime(approval.requested_at)}</td>
                   <td className="px-3 py-3 font-semibold text-slate-900">{approval.project_code}</td>
                   <td className="px-3 py-3 text-slate-600">{approval.approval_type}</td>
                   <td className="px-3 py-3 text-slate-600">{approval.title}</td>
@@ -2665,6 +2796,26 @@ function ApprovalInboxPanel({
                 <p>요청자: {selectedApproval.request_user}</p>
                 <p>요청사유: {selectedApproval.request_reason || '-'}</p>
                 {selectedApproval.comment && <p>처리의견: {selectedApproval.comment}</p>}
+                {selectedApproval.cancellation_reason && (
+                  <p>승인취소 사유: {selectedApproval.cancellation_reason} ({selectedApproval.cancelled_by || '-'} / {formatDate(selectedApproval.cancelled_at?.slice(0, 10))})</p>
+                )}
+                {(selectedApproval.attachments ?? []).length > 0 && (
+                  <div className="pt-2">
+                    <p className="mb-2 font-semibold text-slate-800">결재 첨부파일</p>
+                    <div className="divide-y rounded-md border border-slate-200 bg-white">
+                      {selectedApproval.attachments?.map((attachment) => (
+                        <a
+                          key={attachment.attachment_id}
+                          href={apiUrl(attachment.download_url)}
+                          className="flex items-center justify-between gap-3 px-3 py-2 text-sm text-cyan-800 hover:bg-cyan-50"
+                        >
+                          <span className="truncate">{attachment.file_name}</span>
+                          <Download className="h-4 w-4 shrink-0" aria-hidden="true" />
+                        </a>
+                      ))}
+                    </div>
+                  </div>
+                )}
               </div>
               {pending && (
                 <div className="border-t border-slate-200 pt-4">
@@ -2675,6 +2826,17 @@ function ApprovalInboxPanel({
                     </button>
                     <button type="button" onClick={() => approveApproval(selectedApproval.approval_id)} className="rounded-md bg-cyan-700 px-3 py-2 text-sm font-semibold text-white hover:bg-cyan-800">
                       승인
+                    </button>
+                  </div>
+                </div>
+              )}
+              {canCancelApprovedExecutionBudget && (
+                <div className="border-t border-amber-200 pt-4">
+                  <p className="mb-2 text-sm font-semibold text-amber-900">승인취소 후 재작업</p>
+                  <textarea value={rejectComment} onChange={(event) => setRejectComment(event.target.value)} placeholder="승인취소 사유" className="input min-h-24" />
+                  <div className="mt-3 flex justify-end">
+                    <button type="button" onClick={() => cancelApproval(selectedApproval.approval_id)} disabled={!rejectComment.trim()} className="rounded-md border border-amber-400 px-3 py-2 text-sm font-semibold text-amber-800 hover:bg-amber-50 disabled:cursor-not-allowed disabled:opacity-40">
+                      승인취소 후 재작업
                     </button>
                   </div>
                 </div>

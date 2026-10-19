@@ -6,4 +6,6 @@ import org.springframework.data.jpa.repository.JpaRepository;
 
 public interface ProjectContractRepository extends JpaRepository<ProjectContract, String> {
 	List<ProjectContract> findByProjectId(String projectId);
+	boolean existsByProjectId(String projectId);
+	void deleteByProjectId(String projectId);
 }

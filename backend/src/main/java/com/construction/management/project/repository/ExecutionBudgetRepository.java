@@ -6,4 +6,6 @@ import org.springframework.data.jpa.repository.JpaRepository;
 
 public interface ExecutionBudgetRepository extends JpaRepository<ExecutionBudget, String> {
 	List<ExecutionBudget> findByProjectId(String projectId);
+	boolean existsByProjectId(String projectId);
+	void deleteByProjectId(String projectId);
 }

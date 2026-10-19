@@ -6,6 +6,7 @@ import org.springframework.data.jpa.repository.JpaRepository;
 
 public interface CustomerContractItemRepository extends JpaRepository<CustomerContractItem, String> {
 	List<CustomerContractItem> findByProjectIdOrderByWorkCategoryAsc(String projectId);
+	boolean existsByProjectId(String projectId);
 
 	void deleteByProjectId(String projectId);
 }

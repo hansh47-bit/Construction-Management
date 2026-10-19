@@ -48,4 +48,12 @@ public class ApprovalController {
 	) {
 		return approvalService.reject(approvalId, request);
 	}
+
+	@PostMapping("/{approvalId}/cancel")
+	public ApprovalResponse cancelApprovedExecutionBudget(
+			@PathVariable("approvalId") String approvalId,
+			@RequestBody ApprovalDecisionRequest request
+	) {
+		return approvalService.cancelApprovedExecutionBudget(approvalId, request);
+	}
 }

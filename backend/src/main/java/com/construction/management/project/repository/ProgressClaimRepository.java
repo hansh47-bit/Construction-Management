@@ -9,4 +9,5 @@ public interface ProgressClaimRepository extends JpaRepository<ProgressClaim, St
 	List<ProgressClaim> findByPoIdInAndApprovalStatus(List<String> poIds, ApprovalStatus approvalStatus);
 	List<ProgressClaim> findByPoId(String poId);
 	List<ProgressClaim> findByPoIdIn(List<String> poIds);
+	void deleteByPoIdIn(List<String> poIds);
 }

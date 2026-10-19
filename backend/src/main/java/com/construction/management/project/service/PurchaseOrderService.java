@@ -62,7 +62,7 @@ public class PurchaseOrderService {
 		Map<String, List<ActualPayment>> paymentsByClaim = claimIds.isEmpty() ? Map.of() : actualPaymentRepository.findByClaimIdIn(claimIds).stream().collect(Collectors.groupingBy(ActualPayment::getClaimId));
 
 		return new PurchaseOrderResponse(projectId, project.getProjectCode(), purchaseOrders.stream().map(po -> {
-			ProjectExecutionBudgetItem budgetItem = budgetItemRepository.findById(po.getBudgetId()).orElse(null);
+			ProjectExecutionBudgetItem budgetItem = budgetItemRepository.findByProjectIdAndBudgetItemId(projectId, po.getBudgetId()).orElse(null);
 			BigDecimal currentPoAmount = zero(po.getInitialPoAmount()).add(changesByPo.getOrDefault(po.getPoId(), BigDecimal.ZERO));
 			BigDecimal currentBudgetAmount = budgetItem == null ? zero(po.getApprovedBudgetAmount()) : zero(budgetItem.getApprovedBudgetAmount()).add(changesByBudget.getOrDefault(po.getBudgetId(), BigDecimal.ZERO));
 			List<ProgressClaim> poClaims = claimsByPo.getOrDefault(po.getPoId(), List.of());

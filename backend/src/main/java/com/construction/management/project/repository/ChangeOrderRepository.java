@@ -6,5 +6,7 @@ import org.springframework.data.jpa.repository.JpaRepository;
 
 public interface ChangeOrderRepository extends JpaRepository<ChangeOrder, String> {
 	List<ChangeOrder> findByProjectIdOrderByCreatedAtDesc(String projectId);
+	boolean existsByProjectId(String projectId);
+	void deleteByProjectId(String projectId);
 	List<ChangeOrder> findByChangeOrderIdStartingWithOrderByChangeOrderIdDesc(String prefix);
 }

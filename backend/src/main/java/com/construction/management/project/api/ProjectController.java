@@ -1,10 +1,12 @@
 package com.construction.management.project.api;
 
 import com.construction.management.project.domain.ContractFile;
+import com.construction.management.project.domain.ExecutionBudgetApprovalAttachment;
 import com.construction.management.project.service.ApprovalService;
 import com.construction.management.project.service.CustomerContractService;
 import com.construction.management.project.service.ChangeManagementService;
 import com.construction.management.project.service.ExecutionBudgetDetailService;
+import com.construction.management.project.service.ExecutionBudgetApprovalAttachmentService;
 import com.construction.management.project.service.ProjectService;
 import com.construction.management.project.service.ProjectSettlementService;
 import com.construction.management.project.service.ProgressPaymentService;
@@ -12,7 +14,9 @@ import com.construction.management.project.service.PurchaseOrderService;
 import com.construction.management.project.service.PaymentRequestService;
 import com.construction.management.project.service.VendorComparisonService;
 import jakarta.validation.Valid;
+import java.nio.charset.StandardCharsets;
 import java.util.List;
+import org.springframework.http.CacheControl;
 import org.springframework.core.io.Resource;
 import org.springframework.http.ContentDisposition;
 import org.springframework.http.HttpHeaders;
@@ -20,12 +24,14 @@ import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.PutMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
+import org.springframework.web.bind.annotation.RequestPart;
 import org.springframework.web.bind.annotation.ResponseStatus;
 import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.multipart.MultipartFile;
@@ -44,6 +50,7 @@ public class ProjectController {
 	private final PurchaseOrderService purchaseOrderService;
 	private final PaymentRequestService paymentRequestService;
 	private final ApprovalService approvalService;
+	private final ExecutionBudgetApprovalAttachmentService executionBudgetApprovalAttachmentService;
 
 	public ProjectController(
 			ProjectService projectService,
@@ -55,7 +62,8 @@ public class ProjectController {
 			ProjectSettlementService projectSettlementService,
 			PurchaseOrderService purchaseOrderService,
 			PaymentRequestService paymentRequestService,
-			ApprovalService approvalService
+			ApprovalService approvalService,
+			ExecutionBudgetApprovalAttachmentService executionBudgetApprovalAttachmentService
 	) {
 		this.projectService = projectService;
 		this.customerContractService = customerContractService;
@@ -67,6 +75,7 @@ public class ProjectController {
 		this.purchaseOrderService = purchaseOrderService;
 		this.paymentRequestService = paymentRequestService;
 		this.approvalService = approvalService;
+		this.executionBudgetApprovalAttachmentService = executionBudgetApprovalAttachmentService;
 	}
 
 	@PostMapping
@@ -78,6 +87,12 @@ public class ProjectController {
 	@GetMapping
 	public List<ProjectResponse> search(@RequestParam(name = "keyword", required = false) String keyword) {
 		return projectService.search(keyword);
+	}
+
+	@DeleteMapping("/{projectId}")
+	@ResponseStatus(HttpStatus.NO_CONTENT)
+	public void delete(@PathVariable("projectId") String projectId) {
+		projectService.delete(projectId);
 	}
 
 	@GetMapping("/{projectId}/integrated-summary")
@@ -129,16 +144,50 @@ public class ProjectController {
 		Resource resource = customerContractService.loadFileResource(file);
 		return ResponseEntity.ok()
 				.header(HttpHeaders.CONTENT_DISPOSITION, ContentDisposition.attachment()
-						.filename(file.getFileName())
+						.filename(file.getFileName(), StandardCharsets.UTF_8)
 						.build()
 						.toString())
-				.contentType(MediaType.APPLICATION_OCTET_STREAM)
+				.cacheControl(CacheControl.noStore().mustRevalidate())
+				.contentType(resolveContractFileContentType(file))
 				.body(resource);
+	}
+
+	private MediaType resolveContractFileContentType(ContractFile file) {
+		return org.springframework.http.MediaTypeFactory.getMediaType(file.getFileName())
+				.orElse(MediaType.APPLICATION_OCTET_STREAM);
 	}
 
 	@GetMapping("/{projectId}/execution-budget-details")
 	public ExecutionBudgetDetailResponse getExecutionBudgetDetails(@PathVariable("projectId") String projectId) {
 		return executionBudgetDetailService.getDetails(projectId);
+	}
+
+	@GetMapping("/{projectId}/approvals/{approvalId}/execution-budget-attachments/{attachmentId}")
+	public ResponseEntity<Resource> downloadExecutionBudgetApprovalAttachment(
+			@PathVariable("projectId") String projectId,
+			@PathVariable("approvalId") String approvalId,
+			@PathVariable("attachmentId") String attachmentId
+	) {
+		ExecutionBudgetApprovalAttachment attachment = executionBudgetApprovalAttachmentService.getFile(projectId, approvalId, attachmentId);
+		Resource resource = executionBudgetApprovalAttachmentService.loadFileResource(attachment);
+		return ResponseEntity.ok()
+				.header(HttpHeaders.CONTENT_DISPOSITION, ContentDisposition.attachment()
+						.filename(attachment.getFileName(), StandardCharsets.UTF_8)
+						.build()
+						.toString())
+				.cacheControl(CacheControl.noStore().mustRevalidate())
+				.contentType(resolveAttachmentContentType(attachment))
+				.body(resource);
+	}
+
+	private MediaType resolveAttachmentContentType(ExecutionBudgetApprovalAttachment attachment) {
+		try {
+			return attachment.getContentType() == null || attachment.getContentType().isBlank()
+					? MediaType.APPLICATION_OCTET_STREAM
+					: MediaType.parseMediaType(attachment.getContentType());
+		} catch (IllegalArgumentException ex) {
+			return MediaType.APPLICATION_OCTET_STREAM;
+		}
 	}
 
 	@PutMapping("/{projectId}/execution-budget-details")
@@ -149,12 +198,21 @@ public class ProjectController {
 		return executionBudgetDetailService.saveDetails(projectId, request);
 	}
 
-	@PostMapping("/{projectId}/execution-budget-details/request-approval")
+	@PostMapping(path = "/{projectId}/execution-budget-details/request-approval", consumes = MediaType.APPLICATION_JSON_VALUE)
 	public ApprovalResponse requestExecutionBudgetApproval(
 			@PathVariable("projectId") String projectId,
 			@RequestBody(required = false) ApprovalRequest request
 	) {
 		return approvalService.requestExecutionBudget(projectId, request);
+	}
+
+	@PostMapping(path = "/{projectId}/execution-budget-details/request-approval", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
+	public ApprovalResponse requestExecutionBudgetApprovalWithAttachments(
+			@PathVariable("projectId") String projectId,
+			@RequestPart(name = "request", required = false) ApprovalRequest request,
+			@RequestPart(name = "files", required = false) List<MultipartFile> files
+	) {
+		return approvalService.requestExecutionBudget(projectId, request, files);
 	}
 
 	@GetMapping("/{projectId}/execution-items/{itemId}/comparisons")

@@ -9,4 +9,6 @@ public interface PoRequisitionRepository extends JpaRepository<PoRequisition, St
 	List<PoRequisition> findByProjectIdAndExecutionItemIdAndApprovalStatus(String projectId, String executionItemId, String approvalStatus);
 	Optional<PoRequisition> findTopByProjectIdAndExecutionItemIdOrderByCreatedAtDesc(String projectId, String executionItemId);
 	Optional<PoRequisition> findByApprovalId(String approvalId);
+	boolean existsByProjectId(String projectId);
+	void deleteByProjectId(String projectId);
 }

@@ -23,12 +23,16 @@ import com.construction.management.project.repository.VendorComparisonRepository
 import jakarta.persistence.EntityNotFoundException;
 import java.math.BigDecimal;
 import java.time.Year;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Objects;
 import java.util.UUID;
+import java.util.stream.Collectors;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.util.StringUtils;
+import org.springframework.web.multipart.MultipartFile;
 
 @Service
 public class ApprovalService {
@@ -45,6 +49,7 @@ public class ApprovalService {
 	private final ExecutionBudgetDetailService executionBudgetDetailService;
 	private final ProjectSettlementService projectSettlementService;
 	private final PaymentRequestService paymentRequestService;
+	private final ExecutionBudgetApprovalAttachmentService attachmentService;
 
 	public ApprovalService(
 			ApprovalRepository approvalRepository,
@@ -56,7 +61,8 @@ public class ApprovalService {
 			PurchaseOrderRepository purchaseOrderRepository,
 			ExecutionBudgetDetailService executionBudgetDetailService,
 			ProjectSettlementService projectSettlementService,
-			PaymentRequestService paymentRequestService
+			PaymentRequestService paymentRequestService,
+			ExecutionBudgetApprovalAttachmentService attachmentService
 	) {
 		this.approvalRepository = approvalRepository;
 		this.projectRepository = projectRepository;
@@ -68,6 +74,7 @@ public class ApprovalService {
 		this.executionBudgetDetailService = executionBudgetDetailService;
 		this.projectSettlementService = projectSettlementService;
 		this.paymentRequestService = paymentRequestService;
+		this.attachmentService = attachmentService;
 	}
 
 	@Transactional(readOnly = true)
@@ -100,11 +107,21 @@ public class ApprovalService {
 	@Transactional(readOnly = true)
 	public ApprovalResponse getApproval(String approvalId) {
 		Approval approval = getApprovalEntity(approvalId);
-		return ApprovalResponse.from(approval, getProject(approval.getProjectId()), detailFor(approval));
+		return ApprovalResponse.from(
+				approval,
+				getProject(approval.getProjectId()),
+				detailFor(approval),
+				attachmentService.getResponses(approval.getApprovalId(), approval.getProjectId())
+		);
 	}
 
 	@Transactional
 	public ApprovalResponse requestExecutionBudget(String projectId, ApprovalRequest request) {
+		return requestExecutionBudget(projectId, request, List.of());
+	}
+
+	@Transactional
+	public ApprovalResponse requestExecutionBudget(String projectId, ApprovalRequest request, List<MultipartFile> files) {
 		projectSettlementService.assertNotSettled(projectId);
 		Project project = getProject(projectId);
 		List<ProjectExecutionBudgetDetail> details = budgetDetailRepository.findByProjectIdOrderByBudgetItemIdAscDetailIdAsc(projectId);
@@ -125,6 +142,10 @@ public class ApprovalService {
 			throw new IllegalArgumentException("이미 승인된 최초 실행예산이 있습니다. 변경은 변경관리에서 처리해야 합니다.");
 		}
 
+		// A request is based on the detail rows.  Synchronize the item summary first
+		// so the approval snapshot and the project summary can never diverge.
+		synchronizeBudgetItemSummaries(projectId, details);
+
 		Approval approval = new Approval(
 				nextApprovalId(),
 				projectId,
@@ -138,14 +159,58 @@ public class ApprovalService {
 				request == null ? null : request.requestReason()
 		);
 		approvalRepository.save(approval);
+		attachmentService.saveAll(projectId, approval.getApprovalId(), files);
 		budgetItemRepository.findByProjectIdOrderByItemIdAsc(projectId).forEach(item -> {
 			item.markApprovalRequested(approval.getApprovalId());
 			budgetItemRepository.save(item);
 		});
-		return ApprovalResponse.from(approval, project, detailFor(approval));
+		return ApprovalResponse.from(
+				approval,
+				project,
+				detailFor(approval),
+				attachmentService.getResponses(approval.getApprovalId(), projectId)
+		);
 	}
 
 	@Transactional
+	private void synchronizeBudgetItemSummaries(String projectId, List<ProjectExecutionBudgetDetail> details) {
+		Map<String, List<ProjectExecutionBudgetDetail>> detailsByItem = details.stream()
+				.collect(Collectors.groupingBy(ProjectExecutionBudgetDetail::getBudgetItemId, LinkedHashMap::new, Collectors.toList()));
+		Map<String, ProjectExecutionBudgetItem> itemsByBudgetItemId = budgetItemRepository.findByProjectIdOrderByItemIdAsc(projectId).stream()
+				.collect(Collectors.toMap(
+						item -> ProjectExecutionBudgetItem.budgetItemId(projectId, item.getItemId()),
+						item -> item,
+						(left, right) -> left,
+						LinkedHashMap::new
+				));
+
+		for (Map.Entry<String, List<ProjectExecutionBudgetDetail>> entry : detailsByItem.entrySet()) {
+			ProjectExecutionBudgetDetail first = entry.getValue().get(0);
+			ProjectExecutionBudgetItem item = itemsByBudgetItemId.get(entry.getKey());
+			if (item == null) {
+				item = new ProjectExecutionBudgetItem(
+						ProjectExecutionBudgetItem.storageId(projectId, entry.getKey()),
+						projectId,
+						first.getCategoryName(),
+						first.getItemName()
+				);
+			}
+			item.updateInfo(first.getCategoryName(), first.getItemName());
+			item.updateBudgetAmount(entry.getValue().stream()
+					.map(ProjectExecutionBudgetDetail::getAmount)
+					.map(ApprovalService::defaultZero)
+					.reduce(BigDecimal.ZERO, BigDecimal::add));
+			budgetItemRepository.save(item);
+		}
+
+		budgetItemRepository.findByProjectIdOrderByItemIdAsc(projectId).stream()
+				.filter(item -> !detailsByItem.containsKey(ProjectExecutionBudgetItem.budgetItemId(projectId, item.getItemId())))
+				.forEach(item -> {
+					item.updateBudgetAmount(BigDecimal.ZERO);
+					budgetItemRepository.save(item);
+				});
+	}
+
 	public Approval createPurchaseOrderApproval(Project project, ProjectExecutionBudgetItem item, PoRequisition requisition, String requestReason) {
 		Approval approval = new Approval(
 				nextApprovalId(),
@@ -205,6 +270,32 @@ public class ApprovalService {
 		return ApprovalResponse.from(approval, getProject(approval.getProjectId()), detailFor(approval));
 	}
 
+	@Transactional
+	public ApprovalResponse cancelApprovedExecutionBudget(String approvalId, ApprovalDecisionRequest request) {
+		Approval approval = getApprovalEntity(approvalId);
+		if (!TYPE_EXECUTION_BUDGET.equals(approval.getApprovalType())) {
+			throw new IllegalArgumentException("승인취소 후 재작업은 실행예산 결재에만 사용할 수 있습니다.");
+		}
+		if (approval.getStatus() != ApprovalStatus.APPROVED) {
+			throw new IllegalStateException("승인 완료된 실행예산 결재만 승인취소할 수 있습니다.");
+		}
+		if (request == null || !StringUtils.hasText(request.comment())) {
+			throw new IllegalArgumentException("승인취소 사유를 입력해야 합니다.");
+		}
+		projectSettlementService.assertNotSettled(approval.getProjectId());
+		if (purchaseOrderRepository.existsByProjectId(approval.getProjectId())) {
+			throw new IllegalStateException("발주가 생성된 실행예산은 승인취소할 수 없습니다. 변경관리에서 실행예산 변경결재로 처리하세요.");
+		}
+
+		budgetItemRepository.findByProjectIdOrderByItemIdAsc(approval.getProjectId()).forEach(item -> {
+			item.reject(approval.getApprovalId(), "승인취소: " + request.comment());
+			budgetItemRepository.save(item);
+		});
+		approval.cancel(decisionUser(request), request.comment());
+		approvalRepository.save(approval);
+		return ApprovalResponse.from(approval, getProject(approval.getProjectId()), detailFor(approval));
+	}
+
 	private void approveExecutionBudget(Approval approval) {
 		List<ProjectExecutionBudgetItem> items = budgetItemRepository.findByProjectIdOrderByItemIdAsc(approval.getProjectId());
 		if (items.isEmpty()) {
@@ -221,7 +312,7 @@ public class ApprovalService {
 		if (!ApprovalStatus.REQUESTED.name().equals(requisition.getApprovalStatus())) {
 			throw new IllegalStateException("결재 대기 상태의 발주품의만 승인할 수 있습니다.");
 		}
-		ProjectExecutionBudgetItem item = budgetItemRepository.findById(requisition.getExecutionItemId())
+		ProjectExecutionBudgetItem item = budgetItemRepository.findByProjectIdAndBudgetItemId(approval.getProjectId(), requisition.getExecutionItemId())
 				.orElseThrow(() -> new EntityNotFoundException("실행항목을 찾을 수 없습니다: " + requisition.getExecutionItemId()));
 		if (!item.isApproved()) {
 			throw new IllegalStateException("실행예산 승인 후 발주를 승인할 수 있습니다.");
@@ -259,7 +350,7 @@ public class ApprovalService {
 		}
 		if (TYPE_PURCHASE_ORDER.equals(approval.getApprovalType())) {
 			PoRequisition requisition = getRequisition(approval);
-			ProjectExecutionBudgetItem item = budgetItemRepository.findById(requisition.getExecutionItemId())
+			ProjectExecutionBudgetItem item = budgetItemRepository.findByProjectIdAndBudgetItemId(approval.getProjectId(), requisition.getExecutionItemId())
 					.orElseThrow(() -> new EntityNotFoundException("실행항목을 찾을 수 없습니다: " + requisition.getExecutionItemId()));
 			VendorComparison selected = comparisonRepository.findById(requisition.getSelectedComparisonId())
 					.orElseThrow(() -> new EntityNotFoundException("선정 비교견적을 찾을 수 없습니다: " + requisition.getSelectedComparisonId()));

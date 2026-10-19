@@ -6,4 +6,5 @@ import org.springframework.data.jpa.repository.JpaRepository;
 
 public interface ContractFileRepository extends JpaRepository<ContractFile, String> {
 	List<ContractFile> findByProjectIdOrderByUploadedAtDesc(String projectId);
+	boolean existsByProjectId(String projectId);
 }

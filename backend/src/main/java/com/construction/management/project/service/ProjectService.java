@@ -20,20 +20,28 @@ import com.construction.management.project.domain.ProjectExecutionBudgetItem;
 import com.construction.management.project.domain.ProjectStatus;
 import com.construction.management.project.domain.PurchaseOrder;
 import com.construction.management.project.repository.ActualPaymentRepository;
+import com.construction.management.project.repository.ApprovalRepository;
 import com.construction.management.project.repository.BudgetChangeRepository;
+import com.construction.management.project.repository.ChangeOrderRepository;
 import com.construction.management.project.repository.ContractChangeRepository;
 import com.construction.management.project.repository.CustomerContractItemRepository;
 import com.construction.management.project.repository.ExecutionBudgetRepository;
+import com.construction.management.project.repository.PaymentRequestRepository;
 import com.construction.management.project.repository.PoChangeRepository;
+import com.construction.management.project.repository.PoRequisitionRepository;
 import com.construction.management.project.repository.ProgressClaimRepository;
 import com.construction.management.project.repository.ProjectContractRepository;
+import com.construction.management.project.repository.ProjectExecutionBudgetDetailRepository;
 import com.construction.management.project.repository.ProjectExecutionBudgetItemRepository;
 import com.construction.management.project.repository.ProjectRepository;
+import com.construction.management.project.repository.ProjectSettlementRepository;
 import com.construction.management.project.repository.PurchaseOrderRepository;
+import com.construction.management.project.repository.VendorComparisonRepository;
 import jakarta.persistence.EntityNotFoundException;
 import java.math.BigDecimal;
 import java.math.RoundingMode;
 import java.text.Normalizer;
+import java.util.ArrayList;
 import java.time.LocalDate;
 import java.time.ZoneId;
 import java.time.format.DateTimeFormatter;
@@ -46,6 +54,8 @@ import java.util.stream.Collectors;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.util.StringUtils;
+import org.springframework.http.HttpStatus;
+import org.springframework.web.server.ResponseStatusException;
 
 @Service
 public class ProjectService {
@@ -64,6 +74,15 @@ public class ProjectService {
 	private final PoChangeRepository poChangeRepository;
 	private final ProgressClaimRepository progressClaimRepository;
 	private final ActualPaymentRepository actualPaymentRepository;
+	private final ApprovalRepository approvalRepository;
+	private final ChangeOrderRepository changeOrderRepository;
+	private final CustomerContractService customerContractService;
+	private final ExecutionBudgetApprovalAttachmentService executionBudgetApprovalAttachmentService;
+	private final PaymentRequestRepository paymentRequestRepository;
+	private final PoRequisitionRepository poRequisitionRepository;
+	private final ProjectExecutionBudgetDetailRepository projectExecutionBudgetDetailRepository;
+	private final ProjectSettlementRepository projectSettlementRepository;
+	private final VendorComparisonRepository vendorComparisonRepository;
 
 	public ProjectService(
 			ProjectRepository projectRepository,
@@ -76,7 +95,16 @@ public class ProjectService {
 			PurchaseOrderRepository purchaseOrderRepository,
 			PoChangeRepository poChangeRepository,
 			ProgressClaimRepository progressClaimRepository,
-			ActualPaymentRepository actualPaymentRepository
+			ActualPaymentRepository actualPaymentRepository,
+			ApprovalRepository approvalRepository,
+			ChangeOrderRepository changeOrderRepository,
+			CustomerContractService customerContractService,
+			ExecutionBudgetApprovalAttachmentService executionBudgetApprovalAttachmentService,
+			PaymentRequestRepository paymentRequestRepository,
+			PoRequisitionRepository poRequisitionRepository,
+			ProjectExecutionBudgetDetailRepository projectExecutionBudgetDetailRepository,
+			ProjectSettlementRepository projectSettlementRepository,
+			VendorComparisonRepository vendorComparisonRepository
 	) {
 		this.projectRepository = projectRepository;
 		this.projectContractRepository = projectContractRepository;
@@ -89,6 +117,15 @@ public class ProjectService {
 		this.poChangeRepository = poChangeRepository;
 		this.progressClaimRepository = progressClaimRepository;
 		this.actualPaymentRepository = actualPaymentRepository;
+		this.approvalRepository = approvalRepository;
+		this.changeOrderRepository = changeOrderRepository;
+		this.customerContractService = customerContractService;
+		this.executionBudgetApprovalAttachmentService = executionBudgetApprovalAttachmentService;
+		this.paymentRequestRepository = paymentRequestRepository;
+		this.poRequisitionRepository = poRequisitionRepository;
+		this.projectExecutionBudgetDetailRepository = projectExecutionBudgetDetailRepository;
+		this.projectSettlementRepository = projectSettlementRepository;
+		this.vendorComparisonRepository = vendorComparisonRepository;
 	}
 
 	@Transactional
@@ -130,6 +167,66 @@ public class ProjectService {
 					.reduce(BigDecimal.ZERO, BigDecimal::add);
 			return ProjectResponse.from(project, supplyAmount, totalAmount);
 		}).toList();
+	}
+
+	@Transactional
+	public void delete(String projectId) {
+		Project project = projectRepository.findById(projectId)
+				.orElseThrow(() -> new EntityNotFoundException("프로젝트를 찾을 수 없습니다: " + projectId));
+
+		boolean isSettled = "정산완료".equals(project.getStatus().name()) || projectSettlementRepository.findByProjectId(projectId)
+				.map(settlement -> "SETTLED".equals(settlement.getSettlementStatus()))
+				.orElse(false);
+		if (isSettled) {
+			throw new ResponseStatusException(
+					HttpStatus.CONFLICT,
+					"정산완료된 프로젝트는 삭제할 수 없습니다."
+			);
+		}
+
+		List<String> purchaseOrderIds = purchaseOrderRepository.findByProjectId(projectId).stream()
+				.map(PurchaseOrder::getPoId)
+				.toList();
+		List<String> claimIds = purchaseOrderIds.isEmpty()
+				? List.of()
+				: progressClaimRepository.findByPoIdIn(purchaseOrderIds).stream()
+						.map(ProgressClaim::getClaimId)
+						.toList();
+		List<String> budgetIds = new ArrayList<>();
+		budgetIds.addAll(executionBudgetRepository.findByProjectId(projectId).stream()
+				.map(ExecutionBudget::getBudgetId)
+				.toList());
+		budgetIds.addAll(projectExecutionBudgetItemRepository.findByProjectIdOrderByItemIdAsc(projectId).stream()
+				.map(ProjectExecutionBudgetItem::getItemId)
+				.toList());
+
+		if (!claimIds.isEmpty()) {
+			actualPaymentRepository.deleteByClaimIdIn(claimIds);
+		}
+		if (!purchaseOrderIds.isEmpty()) {
+			progressClaimRepository.deleteByPoIdIn(purchaseOrderIds);
+			poChangeRepository.deleteByPoIdIn(purchaseOrderIds);
+		}
+		if (!budgetIds.isEmpty()) {
+			budgetChangeRepository.deleteByBudgetIdIn(budgetIds);
+		}
+
+		customerContractService.deleteFilesForProject(projectId);
+		executionBudgetApprovalAttachmentService.deleteAllForProject(projectId);
+		approvalRepository.deleteByProjectId(projectId);
+		paymentRequestRepository.deleteByProjectId(projectId);
+		poRequisitionRepository.deleteByProjectId(projectId);
+		vendorComparisonRepository.deleteByProjectId(projectId);
+		purchaseOrderRepository.deleteByProjectId(projectId);
+		projectExecutionBudgetDetailRepository.deleteByProjectId(projectId);
+		projectExecutionBudgetItemRepository.deleteByProjectId(projectId);
+		executionBudgetRepository.deleteByProjectId(projectId);
+		contractChangeRepository.deleteByProjectId(projectId);
+		changeOrderRepository.deleteByProjectId(projectId);
+		customerContractItemRepository.deleteByProjectId(projectId);
+		projectContractRepository.deleteByProjectId(projectId);
+		projectSettlementRepository.deleteByProjectId(projectId);
+		projectRepository.delete(project);
 	}
 
 	@Transactional(readOnly = true)
@@ -199,7 +296,13 @@ public class ProjectService {
 				));
 
 		List<ProjectExecutionBudgetItem> rolledUpExecutionBudgetItems = projectExecutionBudgetItemRepository.findByProjectIdOrderByItemIdAsc(projectId);
-		List<String> rolledUpBudgetIds = rolledUpExecutionBudgetItems.stream().map(ProjectExecutionBudgetItem::getItemId).toList();
+		List<String> rolledUpBudgetIds = rolledUpExecutionBudgetItems.stream()
+				.flatMap(item -> java.util.stream.Stream.of(
+						item.getItemId(),
+						ProjectExecutionBudgetItem.budgetItemId(projectId, item.getItemId())
+				))
+				.distinct()
+				.toList();
 		Map<String, BigDecimal> rolledUpBudgetChanges = rolledUpBudgetIds.isEmpty() ? Map.of() : budgetChangeRepository.findByBudgetIdInAndApprovalStatus(rolledUpBudgetIds, ApprovalStatus.APPROVED).stream()
 				.collect(Collectors.groupingBy(BudgetChange::getBudgetId, Collectors.mapping(change -> defaultZero(change.getChangeAmount()), Collectors.reducing(BigDecimal.ZERO, BigDecimal::add))));
 		BigDecimal currentExecutionBudget = rolledUpExecutionBudgetItems.isEmpty()
@@ -207,8 +310,7 @@ public class ProjectService {
 						.map(budget -> currentBudgetAmount(budget, budgetChangesByBudget))
 						.reduce(BigDecimal.ZERO, BigDecimal::add)
 				: rolledUpExecutionBudgetItems.stream()
-						.filter(ProjectExecutionBudgetItem::isApproved)
-						.map(item -> defaultZero(item.getApprovedBudgetAmount()).add(rolledUpBudgetChanges.getOrDefault(item.getItemId(), BigDecimal.ZERO)))
+						.map(item -> currentRolledUpExecutionBudgetAmount(projectId, item, rolledUpBudgetChanges))
 						.reduce(BigDecimal.ZERO, BigDecimal::add);
 		BigDecimal currentPurchaseAmount = purchaseOrders.stream()
 				.map(po -> currentPoAmount(po, poChangesByPo))
@@ -232,9 +334,8 @@ public class ProjectService {
 						.map(budget -> currentBudgetAmount(budget, budgetChangesByBudget))
 						.reduce(BigDecimal.ZERO, BigDecimal::add)
 				: rolledUpExecutionBudgetItems.stream()
-						.filter(ProjectExecutionBudgetItem::isApproved)
-						.filter(item -> !purchasedBudgetIds.contains(item.getItemId()))
-						.map(item -> defaultZero(item.getApprovedBudgetAmount()).add(rolledUpBudgetChanges.getOrDefault(item.getItemId(), BigDecimal.ZERO)))
+						.filter(item -> !purchasedBudgetIds.contains(ProjectExecutionBudgetItem.budgetItemId(projectId, item.getItemId())))
+						.map(item -> currentRolledUpExecutionBudgetAmount(projectId, item, rolledUpBudgetChanges))
 						.reduce(BigDecimal.ZERO, BigDecimal::add);
 
 		BigDecimal expectedFinalCost = currentPurchaseAmount.add(unpurchasedBudgetAmount);
@@ -334,6 +435,22 @@ public class ProjectService {
 
 	private static BigDecimal currentBudgetAmount(ExecutionBudget budget, Map<String, BigDecimal> changesByBudget) {
 		return defaultZero(budget.getInitialBudget()).add(changesByBudget.getOrDefault(budget.getBudgetId(), BigDecimal.ZERO));
+	}
+
+	private static BigDecimal currentRolledUpExecutionBudgetAmount(
+			String projectId,
+			ProjectExecutionBudgetItem item,
+			Map<String, BigDecimal> changesByBudget
+	) {
+		BigDecimal baseAmount = item.isApproved()
+				? defaultZero(item.getApprovedBudgetAmount())
+				: defaultZero(item.getBudgetAmount());
+		String sourceBudgetItemId = ProjectExecutionBudgetItem.budgetItemId(projectId, item.getItemId());
+		BigDecimal changes = defaultZero(changesByBudget.get(item.getItemId()));
+		if (!sourceBudgetItemId.equals(item.getItemId())) {
+			changes = changes.add(defaultZero(changesByBudget.get(sourceBudgetItemId)));
+		}
+		return baseAmount.add(changes);
 	}
 
 	private static BigDecimal currentPoAmount(PurchaseOrder po, Map<String, BigDecimal> changesByPo) {

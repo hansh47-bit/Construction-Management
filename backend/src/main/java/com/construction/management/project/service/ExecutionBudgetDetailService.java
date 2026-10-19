@@ -77,7 +77,7 @@ public class ExecutionBudgetDetailService {
 
 		detailRepository.deleteByProjectId(projectId);
 		List<ProjectExecutionBudgetDetail> details = request.details().stream()
-				.filter(detail -> StringUtils.hasText(detail.budgetItemId()) && StringUtils.hasText(detail.categoryName()) && StringUtils.hasText(detail.itemName()))
+				.filter(detail -> StringUtils.hasText(detail.budgetItemId()) && StringUtils.hasText(detail.categoryName()))
 				.map(detail -> new ProjectExecutionBudgetDetail(
 						"dtl_" + UUID.randomUUID().toString().replace("-", ""),
 						projectId,
@@ -102,11 +102,25 @@ public class ExecutionBudgetDetailService {
 	private void rollup(String projectId, List<ProjectExecutionBudgetDetail> details) {
 		Map<String, List<ProjectExecutionBudgetDetail>> byItem = details.stream()
 				.collect(Collectors.groupingBy(ProjectExecutionBudgetDetail::getBudgetItemId, LinkedHashMap::new, Collectors.toList()));
+		Map<String, ProjectExecutionBudgetItem> itemsByBudgetItemId = itemRepository.findByProjectIdOrderByItemIdAsc(projectId).stream()
+				.collect(Collectors.toMap(
+						item -> ProjectExecutionBudgetItem.budgetItemId(projectId, item.getItemId()),
+						item -> item,
+						(left, right) -> left,
+						LinkedHashMap::new
+				));
 
 		for (Map.Entry<String, List<ProjectExecutionBudgetDetail>> entry : byItem.entrySet()) {
 			ProjectExecutionBudgetDetail first = entry.getValue().get(0);
-			ProjectExecutionBudgetItem item = itemRepository.findById(entry.getKey())
-					.orElseGet(() -> new ProjectExecutionBudgetItem(entry.getKey(), projectId, first.getCategoryName(), first.getItemName()));
+			ProjectExecutionBudgetItem item = itemsByBudgetItemId.get(entry.getKey());
+			if (item == null) {
+				item = new ProjectExecutionBudgetItem(
+						ProjectExecutionBudgetItem.storageId(projectId, entry.getKey()),
+						projectId,
+						first.getCategoryName(),
+						first.getItemName()
+				);
+			}
 			item.updateInfo(first.getCategoryName(), first.getItemName());
 			item.updateBudgetAmount(entry.getValue().stream()
 					.map(ProjectExecutionBudgetDetail::getAmount)
@@ -116,7 +130,7 @@ public class ExecutionBudgetDetailService {
 		}
 
 		itemRepository.findByProjectIdOrderByItemIdAsc(projectId).stream()
-				.filter(item -> !byItem.containsKey(item.getItemId()))
+				.filter(item -> !byItem.containsKey(ProjectExecutionBudgetItem.budgetItemId(projectId, item.getItemId())))
 				.forEach(item -> {
 					item.updateBudgetAmount(BigDecimal.ZERO);
 					itemRepository.save(item);
@@ -133,6 +147,7 @@ public class ExecutionBudgetDetailService {
 		Map<String, BigDecimal> changesByItem = itemIds.isEmpty() ? Map.of() : budgetChangeRepository.findByBudgetIdInAndApprovalStatus(itemIds, ApprovalStatus.APPROVED).stream()
 				.collect(Collectors.groupingBy(BudgetChange::getBudgetId, Collectors.mapping(change -> defaultZero(change.getChangeAmount()), Collectors.reducing(BigDecimal.ZERO, BigDecimal::add))));
 		BigDecimal approvedAmount = items.stream()
+				.filter(ProjectExecutionBudgetItem::isApproved)
 				.map(item -> defaultZero(item.getApprovedBudgetAmount()).add(changesByItem.getOrDefault(item.getItemId(), BigDecimal.ZERO)))
 				.reduce(BigDecimal.ZERO, BigDecimal::add);
 		BigDecimal totalDetailAmount = details.stream()
@@ -163,7 +178,7 @@ public class ExecutionBudgetDetailService {
 				targetCostLimit.compareTo(BigDecimal.ZERO) > 0 && totalDetailAmount.compareTo(targetCostLimit) > 0,
 				items.stream()
 						.sorted(Comparator.comparing(ProjectExecutionBudgetItem::getItemId))
-						.map(item -> new SummaryItem(item.getItemId(), item.getCategoryName(), item.getItemName(),
+				.map(item -> new SummaryItem(ProjectExecutionBudgetItem.budgetItemId(project.getProjectId(), item.getItemId()), item.getCategoryName(), item.getItemName(),
 								item.isApproved() ? defaultZero(item.getApprovedBudgetAmount()).add(changesByItem.getOrDefault(item.getItemId(), BigDecimal.ZERO)) : item.getBudgetAmount()))
 						.toList(),
 				details.stream()

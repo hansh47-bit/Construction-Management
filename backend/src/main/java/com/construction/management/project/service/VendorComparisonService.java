@@ -49,7 +49,7 @@ public class VendorComparisonService {
 	@Transactional(readOnly = true)
 	public VendorComparisonResponse getComparisons(String projectId, String itemId) {
 		Project project = getProject(projectId);
-		ProjectExecutionBudgetItem item = getItem(itemId);
+		ProjectExecutionBudgetItem item = getItem(projectId, itemId);
 		return toResponse(project, item);
 	}
 
@@ -57,7 +57,7 @@ public class VendorComparisonService {
 	public VendorComparisonResponse saveComparisons(String projectId, String itemId, VendorComparisonRequest request) {
 		projectSettlementService.assertNotSettled(projectId);
 		Project project = getProject(projectId);
-		ProjectExecutionBudgetItem item = getItem(itemId);
+		ProjectExecutionBudgetItem item = getItem(projectId, itemId);
 		requisitionRepository.findTopByProjectIdAndExecutionItemIdOrderByCreatedAtDesc(projectId, itemId)
 				.filter(requisition -> ApprovalStatus.REQUESTED.name().equals(requisition.getApprovalStatus()) || ApprovalStatus.APPROVED.name().equals(requisition.getApprovalStatus()))
 				.ifPresent(requisition -> {
@@ -103,7 +103,7 @@ public class VendorComparisonService {
 	@Transactional(readOnly = true)
 	public PurchaseOrderDraftResponse getPurchaseOrderDraft(String projectId, String itemId) {
 		Project project = getProject(projectId);
-		ProjectExecutionBudgetItem item = getItem(itemId);
+		ProjectExecutionBudgetItem item = getItem(projectId, itemId);
 		VendorComparison selected = comparisonRepository.findByProjectIdAndExecutionItemIdAndSelectedTrue(projectId, itemId)
 				.orElseThrow(() -> new EntityNotFoundException("선정된 비교견적이 없습니다."));
 		PoRequisition requisition = requisitionRepository.findTopByProjectIdAndExecutionItemIdOrderByCreatedAtDesc(projectId, itemId).orElse(null);
@@ -114,7 +114,7 @@ public class VendorComparisonService {
 	public PurchaseOrderDraftResponse requestPurchaseOrder(String projectId, String itemId) {
 		projectSettlementService.assertNotSettled(projectId);
 		Project project = getProject(projectId);
-		ProjectExecutionBudgetItem item = getItem(itemId);
+		ProjectExecutionBudgetItem item = getItem(projectId, itemId);
 		if (!item.isApproved()) {
 			throw new IllegalStateException("실행예산 승인 후 발주품의를 요청할 수 있습니다.");
 		}
@@ -148,15 +148,16 @@ public class VendorComparisonService {
 	}
 
 	private VendorComparisonResponse toResponse(Project project, ProjectExecutionBudgetItem item) {
+		String budgetItemId = ProjectExecutionBudgetItem.budgetItemId(project.getProjectId(), item.getItemId());
 		BigDecimal budgetAmount = currentBudgetAmount(item);
 		return new VendorComparisonResponse(
 				project.getProjectId(),
 				project.getProjectCode(),
-				item.getItemId(),
+				budgetItemId,
 				item.getCategoryName(),
 				item.getItemName(),
 				budgetAmount,
-				comparisonRepository.findByProjectIdAndExecutionItemIdOrderByComparisonIdAsc(project.getProjectId(), item.getItemId()).stream()
+				comparisonRepository.findByProjectIdAndExecutionItemIdOrderByComparisonIdAsc(project.getProjectId(), budgetItemId).stream()
 						.map(comparison -> new VendorComparisonResponse.Item(
 								comparison.getComparisonId(),
 								comparison.getComparisonId(),
@@ -176,13 +177,14 @@ public class VendorComparisonService {
 	}
 
 	private PurchaseOrderDraftResponse toDraft(Project project, ProjectExecutionBudgetItem item, VendorComparison selected, PoRequisition requisition) {
+		String budgetItemId = ProjectExecutionBudgetItem.budgetItemId(project.getProjectId(), item.getItemId());
 		BigDecimal budgetAmount = currentBudgetAmount(item);
 		BigDecimal variance = selected.getQuotedAmount().subtract(budgetAmount);
 		String varianceType = variance.signum() > 0 ? "OVER" : variance.signum() < 0 ? "SAVING" : "EVEN";
 		String color = variance.signum() > 0 ? "RED" : variance.signum() < 0 ? "BLUE" : "DARK";
 		PurchaseOrder purchaseOrder = requisition == null ? null : purchaseOrderRepository.findByRequisitionId(requisition.getRequisitionId()).orElse(null);
 		return new PurchaseOrderDraftResponse(
-				project.getProjectCode(), item.getItemId(), item.getCategoryName(), item.getItemName(), budgetAmount,
+				project.getProjectCode(), budgetItemId, item.getCategoryName(), item.getItemName(), budgetAmount,
 				selected.getVendorName(), selected.getQuotedAmount(), variance, varianceType, color, selected.getSelectionReason(),
 				requisition == null ? "DRAFT" : requisition.getApprovalStatus(),
 				purchaseOrder == null ? null : purchaseOrder.getPoId(),
@@ -193,6 +195,11 @@ public class VendorComparisonService {
 
 	private Project getProject(String projectId) {
 		return projectRepository.findById(projectId).orElseThrow(() -> new EntityNotFoundException("프로젝트를 찾을 수 없습니다: " + projectId));
+	}
+
+	private ProjectExecutionBudgetItem getItem(String projectId, String itemId) {
+		return budgetItemRepository.findByProjectIdAndBudgetItemId(projectId, itemId)
+				.orElseThrow(() -> new EntityNotFoundException("Execution budget item not found: " + itemId));
 	}
 
 	private ProjectExecutionBudgetItem getItem(String itemId) {

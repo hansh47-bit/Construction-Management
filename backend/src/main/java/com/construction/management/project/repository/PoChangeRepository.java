@@ -7,4 +7,5 @@ import org.springframework.data.jpa.repository.JpaRepository;
 
 public interface PoChangeRepository extends JpaRepository<PoChange, String> {
 	List<PoChange> findByPoIdInAndApprovalStatus(List<String> poIds, ApprovalStatus approvalStatus);
+	void deleteByPoIdIn(List<String> poIds);
 }

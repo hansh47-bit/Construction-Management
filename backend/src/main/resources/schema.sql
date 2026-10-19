@@ -13,6 +13,18 @@ ALTER TABLE IF EXISTS project_execution_budget_items
 ALTER TABLE IF EXISTS project_execution_budget_items
 	ADD COLUMN IF NOT EXISTS approval_comment VARCHAR(1000);
 
+ALTER TABLE IF EXISTS approvals
+	ADD COLUMN IF NOT EXISTS cancelled_by VARCHAR(255);
+
+ALTER TABLE IF EXISTS approvals
+	ADD COLUMN IF NOT EXISTS cancellation_reason VARCHAR(1000);
+
+ALTER TABLE IF EXISTS approvals
+	ADD COLUMN IF NOT EXISTS cancelled_at TIMESTAMP;
+
+ALTER TABLE IF EXISTS approvals
+	ALTER COLUMN status ENUM('DRAFT', 'REQUESTED', 'APPROVED', 'REJECTED', 'CANCELLED');
+
 ALTER TABLE IF EXISTS po_requisitions
 	ADD COLUMN IF NOT EXISTS approver VARCHAR(255);
 
@@ -84,4 +96,14 @@ CREATE TABLE IF NOT EXISTS change_orders (
 	requested_by VARCHAR(255) NOT NULL,
 	status VARCHAR(32) NOT NULL,
 	created_at TIMESTAMP NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS execution_budget_approval_attachments (
+	attachment_id VARCHAR(64) PRIMARY KEY,
+	project_id VARCHAR(64) NOT NULL,
+	approval_id VARCHAR(64) NOT NULL,
+	file_name VARCHAR(1000) NOT NULL,
+	file_path VARCHAR(1000) NOT NULL,
+	content_type VARCHAR(255),
+	uploaded_at TIMESTAMP NOT NULL
 );

@@ -62,6 +62,15 @@ public class Approval {
 	@Column(name = "decided_at")
 	private LocalDateTime decidedAt;
 
+	@Column(name = "cancelled_by")
+	private String cancelledBy;
+
+	@Column(name = "cancellation_reason", length = 1000)
+	private String cancellationReason;
+
+	@Column(name = "cancelled_at")
+	private LocalDateTime cancelledAt;
+
 	@Column(name = "created_at", nullable = false, updatable = false)
 	private LocalDateTime createdAt;
 
@@ -114,6 +123,13 @@ public class Approval {
 		this.decidedAt = LocalDateTime.now();
 	}
 
+	public void cancel(String cancelledBy, String cancellationReason) {
+		this.status = ApprovalStatus.CANCELLED;
+		this.cancelledBy = cancelledBy;
+		this.cancellationReason = cancellationReason;
+		this.cancelledAt = LocalDateTime.now();
+	}
+
 	public String getApprovalId() { return approvalId; }
 	public String getProjectId() { return projectId; }
 	public String getApprovalType() { return approvalType; }
@@ -129,4 +145,7 @@ public class Approval {
 	public String getComment() { return comment; }
 	public LocalDateTime getRequestedAt() { return requestedAt; }
 	public LocalDateTime getDecidedAt() { return decidedAt; }
+	public String getCancelledBy() { return cancelledBy; }
+	public String getCancellationReason() { return cancellationReason; }
+	public LocalDateTime getCancelledAt() { return cancelledAt; }
 }

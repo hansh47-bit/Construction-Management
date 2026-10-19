@@ -38,13 +38,24 @@ public record ApprovalResponse(
 		LocalDateTime requestedAt,
 		@JsonProperty("decided_at")
 		LocalDateTime decidedAt,
-		Object detail
+		@JsonProperty("cancelled_by")
+		String cancelledBy,
+		@JsonProperty("cancellation_reason")
+		String cancellationReason,
+		@JsonProperty("cancelled_at")
+		LocalDateTime cancelledAt,
+		Object detail,
+		List<Attachment> attachments
 ) {
 	public static ApprovalResponse from(Approval approval, Project project) {
 		return from(approval, project, null);
 	}
 
 	public static ApprovalResponse from(Approval approval, Project project, Object detail) {
+		return from(approval, project, detail, List.of());
+	}
+
+	public static ApprovalResponse from(Approval approval, Project project, Object detail, List<Attachment> attachments) {
 		return new ApprovalResponse(
 				approval.getApprovalId(),
 				approval.getProjectId(),
@@ -63,8 +74,24 @@ public record ApprovalResponse(
 				approval.getComment(),
 				approval.getRequestedAt(),
 				approval.getDecidedAt(),
-				detail
+				approval.getCancelledBy(),
+				approval.getCancellationReason(),
+				approval.getCancelledAt(),
+			detail,
+			attachments == null ? List.of() : attachments
 		);
+	}
+
+	public record Attachment(
+			@JsonProperty("attachment_id")
+			String attachmentId,
+			@JsonProperty("file_name")
+			String fileName,
+			@JsonProperty("content_type")
+			String contentType,
+			@JsonProperty("download_url")
+			String downloadUrl
+	) {
 	}
 
 	public record ExecutionBudgetDetail(

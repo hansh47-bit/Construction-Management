@@ -110,6 +110,24 @@ public class CustomerContractService {
 		return toResponse(project);
 	}
 
+	@Transactional
+	public void deleteFilesForProject(String projectId) {
+		Path projectDirectory = uploadRoot.resolve(projectId).normalize();
+		List<ContractFile> files = fileRepository.findByProjectIdOrderByUploadedAtDesc(projectId);
+		try {
+			for (ContractFile file : files) {
+				Path filePath = Path.of(file.getFilePath()).toAbsolutePath().normalize();
+				if (!filePath.startsWith(projectDirectory)) {
+					throw new IllegalStateException("계약 파일 경로가 프로젝트 저장소 범위를 벗어났습니다.");
+				}
+				Files.deleteIfExists(filePath);
+			}
+		} catch (IOException ex) {
+			throw new IllegalStateException("계약 첨부파일 삭제에 실패했습니다.", ex);
+		}
+		fileRepository.deleteAll(files);
+	}
+
 	@Transactional(readOnly = true)
 	public ContractFile getFile(String projectId, String fileId) {
 		ContractFile file = fileRepository.findById(fileId)
@@ -178,6 +196,7 @@ public class CustomerContractService {
 								file.getFileName(),
 								file.getFileType(),
 								"/api/v1/projects/" + project.getProjectId() + "/contract-files/" + file.getFileId()
+										+ "?download=" + file.getFileId()
 						))
 						.toList()
 		);

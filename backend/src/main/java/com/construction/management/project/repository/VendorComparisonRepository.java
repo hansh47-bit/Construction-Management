@@ -8,5 +8,7 @@ import org.springframework.data.jpa.repository.JpaRepository;
 public interface VendorComparisonRepository extends JpaRepository<VendorComparison, String> {
 	List<VendorComparison> findByProjectIdAndExecutionItemIdOrderByComparisonIdAsc(String projectId, String executionItemId);
 	Optional<VendorComparison> findByProjectIdAndExecutionItemIdAndSelectedTrue(String projectId, String executionItemId);
+	boolean existsByProjectId(String projectId);
+	void deleteByProjectId(String projectId);
 	void deleteByProjectIdAndExecutionItemId(String projectId, String executionItemId);
 }

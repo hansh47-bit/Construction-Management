@@ -10,6 +10,8 @@ public interface ApprovalRepository extends JpaRepository<Approval, String> {
 	List<Approval> findByStatusOrderByRequestedAtDesc(ApprovalStatus status);
 	List<Approval> findByApprovalTypeOrderByRequestedAtDesc(String approvalType);
 	List<Approval> findByProjectIdOrderByRequestedAtDesc(String projectId);
+	boolean existsByProjectId(String projectId);
+	void deleteByProjectId(String projectId);
 	List<Approval> findByStatusAndApprovalTypeOrderByRequestedAtDesc(ApprovalStatus status, String approvalType);
 	List<Approval> findByStatusAndProjectIdOrderByRequestedAtDesc(ApprovalStatus status, String projectId);
 	List<Approval> findByApprovalTypeAndProjectIdOrderByRequestedAtDesc(String approvalType, String projectId);
