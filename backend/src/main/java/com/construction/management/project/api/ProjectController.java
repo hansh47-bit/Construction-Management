@@ -135,6 +135,14 @@ public class ProjectController {
 		return customerContractService.uploadFile(projectId, fileType, file);
 	}
 
+	@DeleteMapping("/{projectId}/contract-files/{fileId}")
+	public CustomerContractResponse deleteContractFile(
+			@PathVariable("projectId") String projectId,
+			@PathVariable("fileId") String fileId
+	) {
+		return customerContractService.deleteFile(projectId, fileId);
+	}
+
 	@GetMapping("/{projectId}/contract-files/{fileId}")
 	public ResponseEntity<Resource> downloadContractFile(
 			@PathVariable("projectId") String projectId,
