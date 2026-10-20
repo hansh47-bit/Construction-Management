@@ -11,12 +11,14 @@ import com.construction.management.project.domain.PoChange;
 import com.construction.management.project.domain.PaymentRequest;
 import com.construction.management.project.domain.ProgressClaim;
 import com.construction.management.project.domain.Project;
+import com.construction.management.project.domain.ProjectExecutionBudgetItem;
 import com.construction.management.project.domain.PurchaseOrder;
 import com.construction.management.project.repository.ActualPaymentRepository;
 import com.construction.management.project.repository.PoChangeRepository;
 import com.construction.management.project.repository.PaymentRequestRepository;
 import com.construction.management.project.repository.ProgressClaimRepository;
 import com.construction.management.project.repository.ProjectRepository;
+import com.construction.management.project.repository.ProjectExecutionBudgetItemRepository;
 import com.construction.management.project.repository.PurchaseOrderRepository;
 import jakarta.persistence.EntityNotFoundException;
 import java.math.BigDecimal;
@@ -27,6 +29,7 @@ import java.util.UUID;
 import java.util.stream.Collectors;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.util.StringUtils;
 
 @Service
 public class ProgressPaymentService {
@@ -37,8 +40,10 @@ public class ProgressPaymentService {
 	private final ActualPaymentRepository actualPaymentRepository;
 	private final ProjectSettlementService projectSettlementService;
 	private final PaymentRequestRepository paymentRequestRepository;
+	private final ProjectExecutionBudgetItemRepository budgetItemRepository;
+	private final ApprovalService approvalService;
 
-	public ProgressPaymentService(ProjectRepository projectRepository, PurchaseOrderRepository purchaseOrderRepository, PoChangeRepository poChangeRepository, ProgressClaimRepository progressClaimRepository, ActualPaymentRepository actualPaymentRepository, ProjectSettlementService projectSettlementService, PaymentRequestRepository paymentRequestRepository) {
+	public ProgressPaymentService(ProjectRepository projectRepository, PurchaseOrderRepository purchaseOrderRepository, PoChangeRepository poChangeRepository, ProgressClaimRepository progressClaimRepository, ActualPaymentRepository actualPaymentRepository, ProjectSettlementService projectSettlementService, PaymentRequestRepository paymentRequestRepository, ProjectExecutionBudgetItemRepository budgetItemRepository, ApprovalService approvalService) {
 		this.projectRepository = projectRepository;
 		this.purchaseOrderRepository = purchaseOrderRepository;
 		this.poChangeRepository = poChangeRepository;
@@ -46,11 +51,14 @@ public class ProgressPaymentService {
 		this.actualPaymentRepository = actualPaymentRepository;
 		this.projectSettlementService = projectSettlementService;
 		this.paymentRequestRepository = paymentRequestRepository;
+		this.budgetItemRepository = budgetItemRepository;
+		this.approvalService = approvalService;
 	}
 
-	@Transactional(readOnly = true)
+	@Transactional
 	public ProgressPaymentResponse getStatus(String projectId) {
 		Project project = projectRepository.findById(projectId).orElseThrow(() -> new EntityNotFoundException("프로젝트를 찾을 수 없습니다: " + projectId));
+		ensurePendingClaimApprovals(project);
 		return toResponse(project);
 	}
 
@@ -68,18 +76,8 @@ public class ProgressPaymentService {
 		if (approvedClaimTotal.add(newAmount).compareTo(currentPoAmount) > 0) {
 			throw new IllegalArgumentException("기성 신청 금액이 현재 발주금액을 초과합니다.");
 		}
-		progressClaimRepository.save(new ProgressClaim("CLM-" + UUID.randomUUID().toString().substring(0, 8), po.getPoId(), request.degree(), newAmount, ApprovalStatus.REQUESTED));
-		return toResponse(project);
-	}
-
-	@Transactional
-	public ProgressPaymentResponse approveClaim(String projectId, String claimId) {
-		projectSettlementService.assertNotSettled(projectId);
-		Project project = getProject(projectId);
-		ProgressClaim claim = progressClaimRepository.findById(claimId).orElseThrow(() -> new EntityNotFoundException("기성을 찾을 수 없습니다: " + claimId));
-		getPo(projectId, claim.getPoId());
-		claim.approve();
-		progressClaimRepository.save(claim);
+		ProgressClaim claim = progressClaimRepository.save(new ProgressClaim("CLM-" + UUID.randomUUID().toString().substring(0, 8), po.getPoId(), request.degree(), newAmount, ApprovalStatus.REQUESTED));
+		approvalService.createProgressClaimApproval(project, po, claim, approvedClaimTotal);
 		return toResponse(project);
 	}
 
@@ -105,6 +103,8 @@ public class ProgressPaymentService {
 
 	private ProgressPaymentResponse toResponse(Project project) {
 		List<PurchaseOrder> pos = purchaseOrderRepository.findByProjectId(project.getProjectId());
+		Map<String, ProjectExecutionBudgetItem> budgetItemsById = budgetItemRepository.findByProjectIdOrderByItemIdAsc(project.getProjectId()).stream()
+				.collect(Collectors.toMap(item -> ProjectExecutionBudgetItem.budgetItemId(project.getProjectId(), item.getItemId()), item -> item));
 		List<String> poIds = pos.stream().map(PurchaseOrder::getPoId).toList();
 		Map<String, BigDecimal> poChanges = poIds.isEmpty() ? Map.of() : poChangeRepository.findByPoIdInAndApprovalStatus(poIds, ApprovalStatus.APPROVED).stream()
 				.collect(Collectors.groupingBy(PoChange::getPoId, Collectors.mapping(change -> defaultZero(change.getChangeAmount()), Collectors.reducing(BigDecimal.ZERO, BigDecimal::add))));
@@ -115,6 +115,7 @@ public class ProgressPaymentService {
 		Map<String, List<PaymentRequest>> paymentRequestsByPo = paymentRequestRepository.findByProjectId(project.getProjectId()).stream().collect(Collectors.groupingBy(PaymentRequest::getPoId));
 
 		List<PurchaseOrderStatus> purchaseOrderStatuses = pos.stream().map(po -> {
+			ProjectExecutionBudgetItem budgetItem = budgetItemsById.get(po.getBudgetId());
 			BigDecimal currentPo = defaultZero(po.getInitialPoAmount()).add(poChanges.getOrDefault(po.getPoId(), BigDecimal.ZERO));
 			List<ProgressClaim> poClaims = claimsByPo.getOrDefault(po.getPoId(), List.of()).stream().sorted(Comparator.comparing(ProgressClaim::getDegree)).toList();
 			BigDecimal approvedClaimTotal = poClaims.stream().filter(claim -> claim.getApprovalStatus() == ApprovalStatus.APPROVED).map(ProgressClaim::getClaimAmount).reduce(BigDecimal.ZERO, BigDecimal::add);
@@ -123,8 +124,8 @@ public class ProgressPaymentService {
 					.map(PaymentRequest::getApprovalStatus)
 					.filter(status -> ApprovalStatus.REQUESTED.name().equals(status))
 					.findFirst()
-					.orElse(approvedClaimTotal.subtract(paidTotal).signum() <= 0 ? "PAID" : "READY");
-			return new PurchaseOrderStatus(po.getPoId(), po.getVendorName(), currentPo, approvedClaimTotal, paidTotal, currentPo.subtract(approvedClaimTotal), approvedClaimTotal.subtract(paidTotal), currentPo.subtract(paidTotal), paymentRequestStatus, poClaims.stream().map(claim -> {
+					.orElse(approvedClaimTotal.signum() > 0 && paidTotal.compareTo(approvedClaimTotal) >= 0 ? "PAID" : "READY");
+			return new PurchaseOrderStatus(po.getPoId(), po.getVendorName(), po.getBudgetId(), budgetItem == null ? null : budgetItem.getCategoryName(), budgetItem == null ? null : budgetItem.getItemName(), currentPo, approvedClaimTotal, paidTotal, currentPo.subtract(approvedClaimTotal), approvedClaimTotal.subtract(paidTotal), currentPo.subtract(paidTotal), paymentRequestStatus, poClaims.stream().map(claim -> {
 				List<ActualPayment> payments = paymentsByClaim.getOrDefault(claim.getClaimId(), List.of());
 				BigDecimal claimPaid = payments.stream().map(ActualPayment::getPaidAmount).reduce(BigDecimal.ZERO, BigDecimal::add);
 				String paymentState = claim.getApprovalStatus() == ApprovalStatus.REQUESTED ? "REQUESTED" : claimPaid.compareTo(claim.getClaimAmount()) >= 0 ? "PAID" : ApprovalStatus.REQUESTED.name().equals(paymentRequestStatus) ? "PAYMENT_APPROVAL_REQUESTED" : "WAITING_FOR_PAYMENT";
@@ -134,6 +135,25 @@ public class ProgressPaymentService {
 		long pendingPaymentApprovalCount = purchaseOrderStatuses.stream().filter(po -> ApprovalStatus.REQUESTED.name().equals(po.paymentRequestStatus())).count();
 		boolean allPaymentsApproved = !purchaseOrderStatuses.isEmpty() && purchaseOrderStatuses.stream().allMatch(po -> po.totalUnpaidBalance().signum() == 0);
 		return new ProgressPaymentResponse(project.getProjectId(), project.getProjectCode(), allPaymentsApproved, pendingPaymentApprovalCount, purchaseOrderStatuses);
+	}
+
+	private void ensurePendingClaimApprovals(Project project) {
+		List<PurchaseOrder> purchaseOrders = purchaseOrderRepository.findByProjectId(project.getProjectId());
+		Map<String, PurchaseOrder> purchaseOrdersById = purchaseOrders.stream()
+				.collect(Collectors.toMap(PurchaseOrder::getPoId, purchaseOrder -> purchaseOrder));
+		List<String> poIds = purchaseOrders.stream().map(PurchaseOrder::getPoId).toList();
+		if (poIds.isEmpty()) return;
+
+		for (ProgressClaim claim : progressClaimRepository.findByPoIdIn(poIds)) {
+			if (claim.getApprovalStatus() != ApprovalStatus.REQUESTED || StringUtils.hasText(claim.getApprovalId())) continue;
+			PurchaseOrder purchaseOrder = purchaseOrdersById.get(claim.getPoId());
+			if (purchaseOrder == null) continue;
+			BigDecimal approvedClaimTotal = progressClaimRepository.findByPoId(claim.getPoId()).stream()
+					.filter(candidate -> candidate.getApprovalStatus() == ApprovalStatus.APPROVED)
+					.map(ProgressClaim::getClaimAmount)
+					.reduce(BigDecimal.ZERO, BigDecimal::add);
+			approvalService.createProgressClaimApproval(project, purchaseOrder, claim, approvedClaimTotal);
+		}
 	}
 
 	private Project getProject(String projectId) {

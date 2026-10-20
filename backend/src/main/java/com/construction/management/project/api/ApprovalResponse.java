@@ -131,4 +131,17 @@ public record ApprovalResponse(
 			List<VendorComparisonResponse.Item> comparisons
 	) {
 	}
+
+	public record ProgressClaimDetail(
+			@JsonProperty("claim_id") String claimId,
+			@JsonProperty("po_id") String poId,
+			@JsonProperty("vendor_name") String vendorName,
+			@JsonProperty("execution_item_id") String executionItemId,
+			@JsonProperty("work_category") String workCategory,
+			@JsonProperty("execution_item_name") String executionItemName,
+			Integer degree,
+			@JsonProperty("claim_amount") BigDecimal claimAmount,
+			@JsonProperty("approved_claim_total") BigDecimal approvedClaimTotal
+	) {
+	}
 }

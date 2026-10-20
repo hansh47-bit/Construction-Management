@@ -11,12 +11,14 @@ import com.construction.management.project.domain.CustomerContractItem;
 import com.construction.management.project.domain.Project;
 import com.construction.management.project.domain.ProjectExecutionBudgetDetail;
 import com.construction.management.project.domain.ProjectExecutionBudgetItem;
+import com.construction.management.project.domain.PoRequisition;
 import com.construction.management.project.repository.CustomerContractItemRepository;
 import com.construction.management.project.repository.BudgetChangeRepository;
 import com.construction.management.project.repository.ContractChangeRepository;
 import com.construction.management.project.repository.ProjectExecutionBudgetDetailRepository;
 import com.construction.management.project.repository.ProjectExecutionBudgetItemRepository;
 import com.construction.management.project.repository.ProjectRepository;
+import com.construction.management.project.repository.PoRequisitionRepository;
 import jakarta.persistence.EntityNotFoundException;
 import java.math.BigDecimal;
 import java.math.RoundingMode;
@@ -40,6 +42,7 @@ public class ExecutionBudgetDetailService {
 	private final ProjectSettlementService projectSettlementService;
 	private final BudgetChangeRepository budgetChangeRepository;
 	private final ContractChangeRepository contractChangeRepository;
+	private final PoRequisitionRepository poRequisitionRepository;
 
 	public ExecutionBudgetDetailService(
 			ProjectRepository projectRepository,
@@ -48,7 +51,8 @@ public class ExecutionBudgetDetailService {
 			ProjectExecutionBudgetDetailRepository detailRepository,
 			ProjectSettlementService projectSettlementService,
 			BudgetChangeRepository budgetChangeRepository,
-			ContractChangeRepository contractChangeRepository
+			ContractChangeRepository contractChangeRepository,
+			PoRequisitionRepository poRequisitionRepository
 	) {
 		this.projectRepository = projectRepository;
 		this.customerContractItemRepository = customerContractItemRepository;
@@ -57,6 +61,7 @@ public class ExecutionBudgetDetailService {
 		this.projectSettlementService = projectSettlementService;
 		this.budgetChangeRepository = budgetChangeRepository;
 		this.contractChangeRepository = contractChangeRepository;
+		this.poRequisitionRepository = poRequisitionRepository;
 	}
 
 	@Transactional(readOnly = true)
@@ -146,6 +151,8 @@ public class ExecutionBudgetDetailService {
 		List<String> itemIds = items.stream().map(ProjectExecutionBudgetItem::getItemId).toList();
 		Map<String, BigDecimal> changesByItem = itemIds.isEmpty() ? Map.of() : budgetChangeRepository.findByBudgetIdInAndApprovalStatus(itemIds, ApprovalStatus.APPROVED).stream()
 				.collect(Collectors.groupingBy(BudgetChange::getBudgetId, Collectors.mapping(change -> defaultZero(change.getChangeAmount()), Collectors.reducing(BigDecimal.ZERO, BigDecimal::add))));
+		Map<String, String> purchaseOrderStatusByItem = poRequisitionRepository.findByProjectIdOrderByCreatedAtDesc(project.getProjectId()).stream()
+				.collect(Collectors.toMap(PoRequisition::getExecutionItemId, PoRequisition::getApprovalStatus, (latest, ignored) -> latest));
 		BigDecimal approvedAmount = items.stream()
 				.filter(ProjectExecutionBudgetItem::isApproved)
 				.map(item -> defaultZero(item.getApprovedBudgetAmount()).add(changesByItem.getOrDefault(item.getItemId(), BigDecimal.ZERO)))
@@ -179,6 +186,7 @@ public class ExecutionBudgetDetailService {
 				items.stream()
 						.sorted(Comparator.comparing(ProjectExecutionBudgetItem::getItemId))
 				.map(item -> new SummaryItem(ProjectExecutionBudgetItem.budgetItemId(project.getProjectId(), item.getItemId()), item.getCategoryName(), item.getItemName(), item.getApprovalStatus(),
+						purchaseOrderStatusByItem.getOrDefault(ProjectExecutionBudgetItem.budgetItemId(project.getProjectId(), item.getItemId()), "NOT_REQUESTED"),
 						item.isApproved() ? defaultZero(item.getApprovedBudgetAmount()).add(changesByItem.getOrDefault(item.getItemId(), BigDecimal.ZERO)) : item.getBudgetAmount()))
 						.toList(),
 				details.stream()

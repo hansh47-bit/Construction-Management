@@ -12,6 +12,12 @@ export const projectApi = {
   remove(projectId: string) {
     return fetch(apiUrl(`/api/v1/projects/${projectId}`), { method: 'DELETE' })
   },
+  startConstruction(projectId: string) {
+    return fetch(apiUrl(`/api/v1/projects/${projectId}/start-construction`), { method: 'POST' })
+  },
+  synchronizePreparationStatus(projectId: string) {
+    return fetch(apiUrl(`/api/v1/projects/${projectId}/synchronize-preparation-status`), { method: 'POST' })
+  },
   integratedSummary(projectId: string, signal?: AbortSignal) {
     return fetch(apiUrl(`/api/v1/projects/${projectId}/integrated-summary`), { signal })
   },

@@ -37,6 +37,9 @@ public class ProgressClaim {
 	@Column(name = "approved_at")
 	private LocalDateTime approvedAt;
 
+	@Column(name = "approval_id", length = 64)
+	private String approvalId;
+
 	protected ProgressClaim() {
 	}
 
@@ -82,4 +85,15 @@ public class ProgressClaim {
 		this.approvalStatus = ApprovalStatus.APPROVED;
 		this.approvedAt = LocalDateTime.now();
 	}
+
+	public void reject() {
+		this.approvalStatus = ApprovalStatus.REJECTED;
+		this.approvedAt = null;
+	}
+
+	public void linkApproval(String approvalId) {
+		this.approvalId = approvalId;
+	}
+
+	public String getApprovalId() { return approvalId; }
 }

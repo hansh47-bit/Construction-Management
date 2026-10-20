@@ -78,6 +78,7 @@ public class ProjectService {
 	private final ChangeOrderRepository changeOrderRepository;
 	private final CustomerContractService customerContractService;
 	private final ExecutionBudgetApprovalAttachmentService executionBudgetApprovalAttachmentService;
+	private final VendorComparisonAttachmentService vendorComparisonAttachmentService;
 	private final PaymentRequestRepository paymentRequestRepository;
 	private final PoRequisitionRepository poRequisitionRepository;
 	private final ProjectExecutionBudgetDetailRepository projectExecutionBudgetDetailRepository;
@@ -100,6 +101,7 @@ public class ProjectService {
 			ChangeOrderRepository changeOrderRepository,
 			CustomerContractService customerContractService,
 			ExecutionBudgetApprovalAttachmentService executionBudgetApprovalAttachmentService,
+			VendorComparisonAttachmentService vendorComparisonAttachmentService,
 			PaymentRequestRepository paymentRequestRepository,
 			PoRequisitionRepository poRequisitionRepository,
 			ProjectExecutionBudgetDetailRepository projectExecutionBudgetDetailRepository,
@@ -121,6 +123,7 @@ public class ProjectService {
 		this.changeOrderRepository = changeOrderRepository;
 		this.customerContractService = customerContractService;
 		this.executionBudgetApprovalAttachmentService = executionBudgetApprovalAttachmentService;
+		this.vendorComparisonAttachmentService = vendorComparisonAttachmentService;
 		this.paymentRequestRepository = paymentRequestRepository;
 		this.poRequisitionRepository = poRequisitionRepository;
 		this.projectExecutionBudgetDetailRepository = projectExecutionBudgetDetailRepository;
@@ -213,6 +216,7 @@ public class ProjectService {
 
 		customerContractService.deleteFilesForProject(projectId);
 		executionBudgetApprovalAttachmentService.deleteAllForProject(projectId);
+		vendorComparisonAttachmentService.deleteAllForProject(projectId);
 		approvalRepository.deleteByProjectId(projectId);
 		paymentRequestRepository.deleteByProjectId(projectId);
 		poRequisitionRepository.deleteByProjectId(projectId);
@@ -227,6 +231,45 @@ public class ProjectService {
 		projectContractRepository.deleteByProjectId(projectId);
 		projectSettlementRepository.deleteByProjectId(projectId);
 		projectRepository.delete(project);
+	}
+
+	@Transactional
+	public ProjectResponse startConstruction(String projectId) {
+		Project project = projectRepository.findById(projectId)
+				.orElseThrow(() -> new EntityNotFoundException("프로젝트를 찾을 수 없습니다: " + projectId));
+		if (project.getStatus() != ProjectStatus.공사준비) {
+			throw new ResponseStatusException(
+					HttpStatus.CONFLICT,
+					"실행예산 승인 후 공사준비 상태의 프로젝트만 공사를 시작할 수 있습니다."
+			);
+		}
+		project.changeStatus(ProjectStatus.공사진행);
+		return ProjectResponse.from(projectRepository.save(project));
+	}
+
+	@Transactional
+	public ProjectResponse synchronizePreparationStatus(String projectId) {
+		Project project = projectRepository.findById(projectId)
+				.orElseThrow(() -> new EntityNotFoundException("프로젝트를 찾을 수 없습니다: " + projectId));
+		if (project.getStatus() != ProjectStatus.계약) {
+			throw new ResponseStatusException(
+					HttpStatus.CONFLICT,
+					"계약 상태의 프로젝트만 실행예산 승인 상태를 보정할 수 있습니다."
+			);
+		}
+		boolean hasApprovedExecutionBudget = approvalRepository.existsByProjectIdAndApprovalTypeAndStatus(
+				projectId,
+				ApprovalService.TYPE_EXECUTION_BUDGET,
+				ApprovalStatus.APPROVED
+		);
+		if (!hasApprovedExecutionBudget) {
+			throw new ResponseStatusException(
+					HttpStatus.CONFLICT,
+					"승인된 실행예산이 있어야 공사준비 상태로 전환할 수 있습니다."
+			);
+		}
+		project.changeStatus(ProjectStatus.공사준비);
+		return ProjectResponse.from(projectRepository.save(project));
 	}
 
 	@Transactional(readOnly = true)

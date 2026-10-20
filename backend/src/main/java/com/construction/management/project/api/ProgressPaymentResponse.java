@@ -15,6 +15,9 @@ public record ProgressPaymentResponse(
 	public record PurchaseOrderStatus(
 			@JsonProperty("po_id") String poId,
 			@JsonProperty("vendor_name") String vendorName,
+			@JsonProperty("execution_item_id") String executionItemId,
+			@JsonProperty("work_category") String workCategory,
+			@JsonProperty("execution_item_name") String executionItemName,
 			@JsonProperty("current_po_amount") BigDecimal currentPoAmount,
 			@JsonProperty("approved_claim_total") BigDecimal approvedClaimTotal,
 			@JsonProperty("actual_paid_total") BigDecimal actualPaidTotal,

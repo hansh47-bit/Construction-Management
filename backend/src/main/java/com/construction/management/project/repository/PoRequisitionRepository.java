@@ -6,6 +6,7 @@ import java.util.Optional;
 import org.springframework.data.jpa.repository.JpaRepository;
 
 public interface PoRequisitionRepository extends JpaRepository<PoRequisition, String> {
+	List<PoRequisition> findByProjectIdOrderByCreatedAtDesc(String projectId);
 	List<PoRequisition> findByProjectIdAndExecutionItemIdAndApprovalStatus(String projectId, String executionItemId, String approvalStatus);
 	Optional<PoRequisition> findTopByProjectIdAndExecutionItemIdOrderByCreatedAtDesc(String projectId, String executionItemId);
 	Optional<PoRequisition> findByApprovalId(String approvalId);

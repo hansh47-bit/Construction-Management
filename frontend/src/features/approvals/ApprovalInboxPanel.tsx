@@ -1,12 +1,115 @@
 import { Download } from 'lucide-react'
 import { apiUrl } from '../../lib/api-client'
 import { formatDate, formatDateTime, formatWon } from '../../lib/format'
-import type { ApprovalItem } from '../../types/domain'
+import type { ApprovalItem, ExecutionBudgetApprovalDetail, ProgressClaimApprovalDetail, PurchaseOrderApprovalDetail } from '../../types/domain'
 
 function varianceClass(value: number) {
   if (value > 0) return 'text-rose-700'
   if (value < 0) return 'text-blue-700'
   return 'text-slate-900'
+}
+
+function approvalTypeLabel(type: string) {
+  if (type === 'PROGRESS_CLAIM') return '기성 승인'
+  if (type === 'EXECUTION_BUDGET') return '실행예산'
+  if (type === 'PURCHASE_ORDER') return '발주품의'
+  if (type === 'PAYMENT') return '지급'
+  return type
+}
+
+function isPurchaseOrderDetail(detail: ApprovalItem['detail']): detail is PurchaseOrderApprovalDetail {
+  return !!detail && 'selected_vendor_name' in detail && 'comparisons' in detail
+}
+
+function isExecutionBudgetDetail(detail: ApprovalItem['detail']): detail is ExecutionBudgetApprovalDetail {
+  return !!detail && 'summary_by_item' in detail && 'total_detail_amount' in detail
+}
+
+function isProgressClaimDetail(detail: ApprovalItem['detail']): detail is ProgressClaimApprovalDetail {
+  return !!detail && 'claim_id' in detail && 'claim_amount' in detail
+}
+
+function ApprovalDocument({ approval }: { approval: ApprovalItem }) {
+  if (approval.approval_type === 'PROGRESS_CLAIM' && isProgressClaimDetail(approval.detail)) {
+    const detail = approval.detail
+    return (
+      <section className="border-t border-slate-200 pt-4">
+        <p className="text-sm font-bold text-slate-950">기성 승인 검토 내용</p>
+        <div className="mt-3 rounded-md border border-cyan-200 bg-cyan-50 p-3">
+          <p className="text-xs font-semibold text-cyan-800">{detail.po_id} · {detail.execution_item_id}</p>
+          <p className="mt-1 text-base font-bold text-slate-950">{detail.vendor_name}</p>
+          <p className="mt-1 text-sm text-slate-700">{detail.work_category || '공종 미입력'} · {detail.execution_item_name || '실행항목 미입력'}</p>
+        </div>
+        <div className="mt-3 grid grid-cols-2 gap-2 text-sm">
+          <div className="rounded border border-slate-200 bg-white p-2"><p className="text-xs text-slate-500">기성 차수</p><strong>{detail.degree}차</strong></div>
+          <div className="rounded border border-slate-200 bg-white p-2"><p className="text-xs text-slate-500">이번 기성 금액</p><strong>{formatWon(detail.claim_amount)}</strong></div>
+          <div className="col-span-2 rounded border border-slate-200 bg-white p-2"><p className="text-xs text-slate-500">승인 기성 누계(이번 건 전)</p><strong>{formatWon(detail.approved_claim_total)}</strong></div>
+        </div>
+      </section>
+    )
+  }
+
+  if (approval.approval_type === 'PURCHASE_ORDER' && isPurchaseOrderDetail(approval.detail)) {
+    const detail = approval.detail
+    return (
+      <section className="border-t border-slate-200 pt-4">
+        <p className="text-sm font-bold text-slate-950">발주품의 검토 내용</p>
+        <div className="mt-3 rounded-md border border-cyan-200 bg-cyan-50 p-3">
+          <p className="text-xs font-semibold text-cyan-800">{detail.execution_item_id} · {detail.work_category || '공종 미입력'}</p>
+          <p className="mt-1 text-base font-bold text-slate-950">{detail.execution_item_name || '실행항목명 미입력'}</p>
+          <p className="mt-2 text-sm text-slate-700">선정 업체: <strong>{detail.selected_vendor_name}</strong></p>
+        </div>
+        <div className="mt-3 grid grid-cols-2 gap-2 text-sm">
+          <div className="rounded border border-slate-200 bg-white p-2"><p className="text-xs text-slate-500">승인 실행예산</p><strong>{formatWon(detail.approved_execution_budget)}</strong></div>
+          <div className="rounded border border-slate-200 bg-white p-2"><p className="text-xs text-slate-500">발주 요청금액</p><strong>{formatWon(detail.proposed_po_amount)}</strong></div>
+          <div className="col-span-2 rounded border border-slate-200 bg-white p-2"><p className="text-xs text-slate-500">예산 대비</p><strong className={varianceClass(detail.budget_variance)}>{formatWon(detail.budget_variance)}</strong></div>
+        </div>
+        <div className="mt-3 rounded border border-slate-200 bg-white p-3 text-sm"><p className="text-xs font-semibold text-slate-500">선정 사유</p><p className="mt-1 whitespace-pre-wrap text-slate-800">{detail.selection_reason || '-'}</p></div>
+        <div className="mt-4 overflow-x-auto">
+          <p className="mb-2 text-sm font-semibold text-slate-800">업체별 비교견적</p>
+          <table className="min-w-[620px] text-left text-xs">
+            <thead className="bg-slate-100 text-slate-500"><tr><th className="px-2 py-2">업체</th><th className="px-2 py-2">견적금액</th><th className="px-2 py-2">VAT</th><th className="px-2 py-2">예산대비</th><th className="px-2 py-2">선정</th></tr></thead>
+            <tbody className="divide-y divide-slate-100 bg-white">
+              {detail.comparisons.map((comparison) => (
+                <tr key={comparison.comparison_id ?? comparison.comparison_code ?? comparison.vendor_name} className={comparison.is_selected ? 'bg-cyan-50' : ''}>
+                  <td className="px-2 py-2 font-semibold text-slate-800">{comparison.vendor_name || '-'}</td>
+                  <td className="px-2 py-2">{formatWon(comparison.quoted_amount)}</td>
+                  <td className="px-2 py-2">{comparison.vat_type || '-'}</td>
+                  <td className={`px-2 py-2 font-semibold ${varianceClass(comparison.budget_variance ?? 0)}`}>{formatWon(comparison.budget_variance ?? 0)}</td>
+                  <td className="px-2 py-2">{comparison.is_selected ? <span className="rounded bg-cyan-700 px-2 py-1 font-semibold text-white">선정</span> : '-'}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </section>
+    )
+  }
+
+  if (approval.approval_type === 'EXECUTION_BUDGET' && isExecutionBudgetDetail(approval.detail)) {
+    const detail = approval.detail
+    return (
+      <section className="border-t border-slate-200 pt-4">
+        <p className="text-sm font-bold text-slate-950">실행예산 검토 내용</p>
+        <div className="mt-3 grid grid-cols-2 gap-2 text-sm">
+          <div className="rounded border border-slate-200 bg-white p-2"><p className="text-xs text-slate-500">계약 공급가</p><strong>{formatWon(detail.contract_supply_amount)}</strong></div>
+          <div className="rounded border border-slate-200 bg-white p-2"><p className="text-xs text-slate-500">목표 원가한도</p><strong>{formatWon(detail.target_cost_limit)}</strong></div>
+          <div className={`col-span-2 rounded border p-2 ${detail.over_target_limit ? 'border-rose-300 bg-rose-50' : 'border-emerald-300 bg-emerald-50'}`}><p className="text-xs text-slate-500">실행예산 합계</p><strong>{formatWon(detail.total_detail_amount)}</strong><span className="ml-2 text-xs font-semibold">{detail.over_target_limit ? '원가한도 초과' : '원가한도 이내'}</span></div>
+        </div>
+        <div className="mt-4 overflow-x-auto">
+          <p className="mb-2 text-sm font-semibold text-slate-800">공종별 실행예산</p>
+          <table className="min-w-[520px] text-left text-xs">
+            <thead className="bg-slate-100 text-slate-500"><tr><th className="px-2 py-2">항목</th><th className="px-2 py-2">공종</th><th className="px-2 py-2 text-right">금액</th></tr></thead>
+            <tbody className="divide-y divide-slate-100 bg-white">
+              {detail.summary_by_item.map((item) => <tr key={item.budget_item_id}><td className="px-2 py-2 font-medium">{item.budget_item_id}</td><td className="px-2 py-2">{item.category_name} · {item.item_name}</td><td className="px-2 py-2 text-right font-semibold">{formatWon(item.rolled_up_amount)}</td></tr>)}
+            </tbody>
+          </table>
+        </div>
+      </section>
+    )
+  }
+
+  return <p className="border-t border-slate-200 pt-4 text-sm text-slate-500">세부 결재 문서를 불러오는 중이거나, 이 결재 유형의 상세 양식이 아직 없습니다.</p>
 }
 
 export function ApprovalInboxPanel({
@@ -59,6 +162,7 @@ export function ApprovalInboxPanel({
             <option value="">전체 유형</option>
             <option value="EXECUTION_BUDGET">실행예산</option>
             <option value="PURCHASE_ORDER">발주</option>
+            <option value="PROGRESS_CLAIM">기성 승인</option>
           </select>
         </div>
       </div>
@@ -84,7 +188,7 @@ export function ApprovalInboxPanel({
 				  <td className="px-3 py-3 text-slate-500">{index + 1}</td>
                   <td className="px-3 py-3 text-slate-600">{formatDateTime(approval.requested_at)}</td>
                   <td className="px-3 py-3 font-semibold text-slate-900">{approval.project_code}</td>
-                  <td className="px-3 py-3 text-slate-600">{approval.approval_type}</td>
+                  <td className="px-3 py-3 text-slate-600">{approvalTypeLabel(approval.approval_type)}</td>
                   <td className="px-3 py-3 text-slate-600">{approval.title}</td>
                   <td className="px-3 py-3 font-semibold text-slate-900">{formatWon(approval.requested_amount)}</td>
                   <td className={`px-3 py-3 font-semibold ${varianceClass(approval.variance_amount)}`}>{formatWon(approval.variance_amount)}</td>
@@ -109,7 +213,7 @@ export function ApprovalInboxPanel({
           {selectedApproval ? (
             <div>
               <div className="border-b border-slate-200 pb-3">
-                <p className="text-xs font-semibold text-slate-500">{selectedApproval.approval_type}</p>
+                <p className="text-xs font-semibold text-slate-500">{approvalTypeLabel(selectedApproval.approval_type)}</p>
                 <h4 className="mt-1 text-base font-semibold text-slate-950">{selectedApproval.title}</h4>
                 <p className="mt-1 text-sm text-slate-500">{selectedApproval.project_code} · {selectedApproval.status}</p>
               </div>
@@ -123,6 +227,7 @@ export function ApprovalInboxPanel({
                 {selectedApproval.cancellation_reason && (
                   <p>승인취소 사유: {selectedApproval.cancellation_reason} ({selectedApproval.cancelled_by || '-'} / {formatDate(selectedApproval.cancelled_at?.slice(0, 10))})</p>
                 )}
+                <ApprovalDocument approval={selectedApproval} />
                 {(selectedApproval.attachments ?? []).length > 0 && (
                   <div className="pt-2">
                     <p className="mb-2 font-semibold text-slate-800">결재 첨부파일</p>

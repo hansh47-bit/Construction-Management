@@ -23,6 +23,7 @@ public record VendorComparisonResponse(
 			@JsonProperty("scope_and_notes") String scopeAndNotes,
 			@JsonProperty("payment_terms") String paymentTerms,
 			@JsonProperty("estimate_file_url") String estimateFileUrl,
+			List<ApprovalResponse.Attachment> attachments,
 			@JsonProperty("is_selected") boolean selected,
 			@JsonProperty("selection_reason") String selectionReason,
 			@JsonProperty("budget_variance") BigDecimal budgetVariance

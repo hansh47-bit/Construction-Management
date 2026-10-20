@@ -11,6 +11,8 @@ import com.construction.management.project.domain.PoRequisition;
 import com.construction.management.project.domain.Project;
 import com.construction.management.project.domain.ProjectExecutionBudgetDetail;
 import com.construction.management.project.domain.ProjectExecutionBudgetItem;
+import com.construction.management.project.domain.ProjectStatus;
+import com.construction.management.project.domain.ProgressClaim;
 import com.construction.management.project.domain.PurchaseOrder;
 import com.construction.management.project.domain.VendorComparison;
 import com.construction.management.project.repository.ApprovalRepository;
@@ -18,6 +20,7 @@ import com.construction.management.project.repository.PoRequisitionRepository;
 import com.construction.management.project.repository.ProjectExecutionBudgetDetailRepository;
 import com.construction.management.project.repository.ProjectExecutionBudgetItemRepository;
 import com.construction.management.project.repository.ProjectRepository;
+import com.construction.management.project.repository.ProgressClaimRepository;
 import com.construction.management.project.repository.PurchaseOrderRepository;
 import com.construction.management.project.repository.VendorComparisonRepository;
 import jakarta.persistence.EntityNotFoundException;
@@ -38,6 +41,7 @@ import org.springframework.web.multipart.MultipartFile;
 public class ApprovalService {
 	public static final String TYPE_EXECUTION_BUDGET = "EXECUTION_BUDGET";
 	public static final String TYPE_PURCHASE_ORDER = "PURCHASE_ORDER";
+	public static final String TYPE_PROGRESS_CLAIM = "PROGRESS_CLAIM";
 
 	private final ApprovalRepository approvalRepository;
 	private final ProjectRepository projectRepository;
@@ -46,10 +50,12 @@ public class ApprovalService {
 	private final PoRequisitionRepository requisitionRepository;
 	private final VendorComparisonRepository comparisonRepository;
 	private final PurchaseOrderRepository purchaseOrderRepository;
+	private final ProgressClaimRepository progressClaimRepository;
 	private final ExecutionBudgetDetailService executionBudgetDetailService;
 	private final ProjectSettlementService projectSettlementService;
 	private final PaymentRequestService paymentRequestService;
 	private final ExecutionBudgetApprovalAttachmentService attachmentService;
+	private final VendorComparisonAttachmentService vendorComparisonAttachmentService;
 
 	public ApprovalService(
 			ApprovalRepository approvalRepository,
@@ -59,10 +65,12 @@ public class ApprovalService {
 			PoRequisitionRepository requisitionRepository,
 			VendorComparisonRepository comparisonRepository,
 			PurchaseOrderRepository purchaseOrderRepository,
+			ProgressClaimRepository progressClaimRepository,
 			ExecutionBudgetDetailService executionBudgetDetailService,
 			ProjectSettlementService projectSettlementService,
 			PaymentRequestService paymentRequestService,
-			ExecutionBudgetApprovalAttachmentService attachmentService
+			ExecutionBudgetApprovalAttachmentService attachmentService,
+			VendorComparisonAttachmentService vendorComparisonAttachmentService
 	) {
 		this.approvalRepository = approvalRepository;
 		this.projectRepository = projectRepository;
@@ -71,10 +79,12 @@ public class ApprovalService {
 		this.requisitionRepository = requisitionRepository;
 		this.comparisonRepository = comparisonRepository;
 		this.purchaseOrderRepository = purchaseOrderRepository;
+		this.progressClaimRepository = progressClaimRepository;
 		this.executionBudgetDetailService = executionBudgetDetailService;
 		this.projectSettlementService = projectSettlementService;
 		this.paymentRequestService = paymentRequestService;
 		this.attachmentService = attachmentService;
+		this.vendorComparisonAttachmentService = vendorComparisonAttachmentService;
 	}
 
 	@Transactional(readOnly = true)
@@ -111,7 +121,7 @@ public class ApprovalService {
 				approval,
 				getProject(approval.getProjectId()),
 				detailFor(approval),
-				attachmentService.getResponses(approval.getApprovalId(), approval.getProjectId())
+				attachmentsFor(approval)
 		);
 	}
 
@@ -124,6 +134,9 @@ public class ApprovalService {
 	public ApprovalResponse requestExecutionBudget(String projectId, ApprovalRequest request, List<MultipartFile> files) {
 		projectSettlementService.assertNotSettled(projectId);
 		Project project = getProject(projectId);
+		if (project.getStatus() == ProjectStatus.견적) {
+			throw new IllegalStateException("고객 계약을 저장하여 계약 상태로 변경한 후 실행예산 결재를 요청할 수 있습니다.");
+		}
 		List<ProjectExecutionBudgetDetail> details = budgetDetailRepository.findByProjectIdOrderByBudgetItemIdAscDetailIdAsc(projectId);
 		if (details.isEmpty()) {
 			throw new IllegalArgumentException("세부 실행예산 입력 항목이 있어야 결재요청할 수 있습니다.");
@@ -230,6 +243,25 @@ public class ApprovalService {
 		return approval;
 	}
 
+	public Approval createProgressClaimApproval(Project project, PurchaseOrder purchaseOrder, ProgressClaim claim, BigDecimal approvedClaimTotal) {
+		Approval approval = new Approval(
+				nextApprovalId(),
+				project.getProjectId(),
+				TYPE_PROGRESS_CLAIM,
+				claim.getClaimId(),
+				purchaseOrder.getVendorName() + " " + claim.getDegree() + "차 기성 승인 요청",
+				claim.getClaimAmount(),
+				defaultZero(approvedClaimTotal),
+				claim.getClaimAmount().subtract(defaultZero(approvedClaimTotal)),
+				"system",
+				purchaseOrder.getPoId() + " 기성 " + claim.getDegree() + "차 승인 요청"
+		);
+		approvalRepository.save(approval);
+		claim.linkApproval(approval.getApprovalId());
+		progressClaimRepository.save(claim);
+		return approval;
+	}
+
 	@Transactional
 	public ApprovalResponse approve(String approvalId, ApprovalDecisionRequest request) {
 		Approval approval = getRequestedApproval(approvalId);
@@ -237,6 +269,8 @@ public class ApprovalService {
 			approveExecutionBudget(approval);
 		} else if (TYPE_PURCHASE_ORDER.equals(approval.getApprovalType())) {
 			approvePurchaseOrder(approval, request);
+		} else if (TYPE_PROGRESS_CLAIM.equals(approval.getApprovalType())) {
+			approveProgressClaim(approval);
 		} else if (PaymentRequestService.TYPE_PAYMENT.equals(approval.getApprovalType())) {
 			paymentRequestService.approve(approval, request);
 		} else {
@@ -244,7 +278,7 @@ public class ApprovalService {
 		}
 		approval.approve(decisionUser(request), request == null ? null : request.comment());
 		approvalRepository.save(approval);
-		return ApprovalResponse.from(approval, getProject(approval.getProjectId()), detailFor(approval));
+		return ApprovalResponse.from(approval, getProject(approval.getProjectId()), detailFor(approval), attachmentsFor(approval));
 	}
 
 	@Transactional
@@ -262,12 +296,16 @@ public class ApprovalService {
 			PoRequisition requisition = getRequisition(approval);
 			requisition.reject(decisionUser(request), request.comment());
 			requisitionRepository.save(requisition);
+		} else if (TYPE_PROGRESS_CLAIM.equals(approval.getApprovalType())) {
+			ProgressClaim claim = getProgressClaim(approval);
+			claim.reject();
+			progressClaimRepository.save(claim);
 		} else if (PaymentRequestService.TYPE_PAYMENT.equals(approval.getApprovalType())) {
 			paymentRequestService.reject(approval);
 		}
 		approval.reject(decisionUser(request), request.comment());
 		approvalRepository.save(approval);
-		return ApprovalResponse.from(approval, getProject(approval.getProjectId()), detailFor(approval));
+		return ApprovalResponse.from(approval, getProject(approval.getProjectId()), detailFor(approval), attachmentsFor(approval));
 	}
 
 	@Transactional
@@ -293,7 +331,7 @@ public class ApprovalService {
 		});
 		approval.cancel(decisionUser(request), request.comment());
 		approvalRepository.save(approval);
-		return ApprovalResponse.from(approval, getProject(approval.getProjectId()), detailFor(approval));
+		return ApprovalResponse.from(approval, getProject(approval.getProjectId()), detailFor(approval), attachmentsFor(approval));
 	}
 
 	private void approveExecutionBudget(Approval approval) {
@@ -305,6 +343,11 @@ public class ApprovalService {
 			item.approve(approval.getApprovalId());
 			budgetItemRepository.save(item);
 		});
+		Project project = getProject(approval.getProjectId());
+		if (project.getStatus() == ProjectStatus.계약) {
+			project.changeStatus(ProjectStatus.공사준비);
+			projectRepository.save(project);
+		}
 	}
 
 	private void approvePurchaseOrder(Approval approval, ApprovalDecisionRequest request) {
@@ -336,6 +379,15 @@ public class ApprovalService {
 		requisitionRepository.save(requisition);
 	}
 
+	private void approveProgressClaim(Approval approval) {
+		ProgressClaim claim = getProgressClaim(approval);
+		if (claim.getApprovalStatus() != ApprovalStatus.REQUESTED) {
+			throw new IllegalStateException("결재 대기 상태의 기성만 승인할 수 있습니다.");
+		}
+		claim.approve();
+		progressClaimRepository.save(claim);
+	}
+
 	private Object detailFor(Approval approval) {
 		if (TYPE_EXECUTION_BUDGET.equals(approval.getApprovalType())) {
 			ExecutionBudgetDetailResponse response = executionBudgetDetailService.getDetails(approval.getProjectId());
@@ -365,6 +417,7 @@ public class ApprovalService {
 							comparison.getScopeAndNotes(),
 							comparison.getPaymentTerms(),
 							comparison.getEstimateFileUrl(),
+							vendorComparisonAttachmentService.getResponses(approval.getProjectId(), requisition.getExecutionItemId(), comparison.getComparisonId()),
 							comparison.isSelected(),
 							comparison.getSelectionReason(),
 							defaultZero(comparison.getQuotedAmount()).subtract(defaultZero(item.getApprovedBudgetAmount()))
@@ -383,7 +436,35 @@ public class ApprovalService {
 					comparisons
 			);
 		}
+		if (TYPE_PROGRESS_CLAIM.equals(approval.getApprovalType())) {
+			ProgressClaim claim = getProgressClaim(approval);
+			PurchaseOrder purchaseOrder = purchaseOrderRepository.findById(claim.getPoId())
+					.orElseThrow(() -> new EntityNotFoundException("발주를 찾을 수 없습니다: " + claim.getPoId()));
+			ProjectExecutionBudgetItem item = budgetItemRepository.findByProjectIdAndBudgetItemId(approval.getProjectId(), purchaseOrder.getBudgetId()).orElse(null);
+			BigDecimal approvedClaimTotal = progressClaimRepository.findByPoId(claim.getPoId()).stream()
+					.filter(candidate -> candidate.getApprovalStatus() == ApprovalStatus.APPROVED)
+					.map(ProgressClaim::getClaimAmount).map(ApprovalService::defaultZero).reduce(BigDecimal.ZERO, BigDecimal::add);
+			return new ApprovalResponse.ProgressClaimDetail(
+					claim.getClaimId(), purchaseOrder.getPoId(), purchaseOrder.getVendorName(), purchaseOrder.getBudgetId(),
+					item == null ? null : item.getCategoryName(), item == null ? null : item.getItemName(), claim.getDegree(), claim.getClaimAmount(), approvedClaimTotal);
+		}
 		return null;
+	}
+
+	private List<ApprovalResponse.Attachment> attachmentsFor(Approval approval) {
+		if (TYPE_EXECUTION_BUDGET.equals(approval.getApprovalType())) {
+			return attachmentService.getResponses(approval.getApprovalId(), approval.getProjectId());
+		}
+		if (TYPE_PURCHASE_ORDER.equals(approval.getApprovalType())) {
+			PoRequisition requisition = getRequisition(approval);
+			return comparisonRepository.findByProjectIdAndExecutionItemIdOrderByComparisonIdAsc(
+					approval.getProjectId(), requisition.getExecutionItemId())
+					.stream()
+					.flatMap(comparison -> vendorComparisonAttachmentService.getResponses(
+							approval.getProjectId(), requisition.getExecutionItemId(), comparison.getComparisonId()).stream())
+					.toList();
+		}
+		return List.of();
 	}
 
 	private Approval getRequestedApproval(String approvalId) {
@@ -403,6 +484,11 @@ public class ApprovalService {
 		return requisitionRepository.findByApprovalId(approval.getApprovalId())
 				.orElseGet(() -> requisitionRepository.findById(approval.getTargetId())
 						.orElseThrow(() -> new EntityNotFoundException("발주품의를 찾을 수 없습니다: " + approval.getTargetId())));
+	}
+
+	private ProgressClaim getProgressClaim(Approval approval) {
+		return progressClaimRepository.findById(approval.getTargetId())
+				.orElseThrow(() -> new EntityNotFoundException("기성 정보를 찾을 수 없습니다: " + approval.getTargetId()));
 	}
 
 	private Project getProject(String projectId) {

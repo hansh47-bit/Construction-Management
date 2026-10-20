@@ -36,7 +36,7 @@ const workflowStatusLabels: Record<string, string> = {
   REJECTED: '반려',
   CANCELLED: '취소',
   COMPLETED: '완료',
-  READY: '지급요청 가능',
+  READY: '지급요청 전',
   PAID: '지급 완료',
   WAITING_FOR_PAYMENT: '지급 대기',
   PAYMENT_APPROVAL_REQUESTED: '지급결재 대기',

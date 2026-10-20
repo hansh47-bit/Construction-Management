@@ -1,8 +1,8 @@
 import { formatNumber } from '../../lib/format'
 
-export function MoneyInput({ value, onChange, disabled = false }: { value: number; onChange: (value: string) => void; disabled?: boolean }) {
+export function MoneyInput({ value, onChange, disabled = false, className = '' }: { value: number; onChange: (value: string) => void; disabled?: boolean; className?: string }) {
   return (
-    <div className="flex items-center gap-2 rounded-md border border-slate-300 bg-white px-3 py-2 focus-within:border-cyan-700 focus-within:ring-2 focus-within:ring-cyan-700/15">
+    <div className={`flex items-center gap-2 rounded-md border border-slate-300 bg-white px-3 py-2 focus-within:border-cyan-700 focus-within:ring-2 focus-within:ring-cyan-700/15 ${className}`}>
       <input
         disabled={disabled}
         value={formatNumber(value)}

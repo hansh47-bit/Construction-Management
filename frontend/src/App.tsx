@@ -278,6 +278,46 @@ function App() {
     await loadProjects(keyword)
   }
 
+  async function startConstruction() {
+    if (!selectedProjectId || !selectedProject) return
+    if (!window.confirm(`“${selectedProject.project_name}” 프로젝트의 공사를 시작하시겠습니까? 상태가 공사진행으로 변경됩니다.`)) {
+      return
+    }
+
+    const response = await projectApi.startConstruction(selectedProjectId)
+    if (!response.ok) {
+      const body = await response.json().catch(() => null) as { detail?: string; message?: string } | null
+      setError(body?.detail ?? body?.message ?? `공사 시작 처리 실패: ${response.status}`)
+      return
+    }
+
+    await response.json()
+    await loadProjects(keyword)
+    const summaryResponse = await projectApi.integratedSummary(selectedProjectId)
+    if (summaryResponse.ok) setSummary(await summaryResponse.json())
+    setError(null)
+  }
+
+  async function synchronizePreparationStatus() {
+    if (!selectedProjectId || !selectedProject) return
+    if (!window.confirm(`“${selectedProject.project_name}” 프로젝트의 승인된 실행예산을 반영해 상태를 공사준비로 변경하시겠습니까?`)) {
+      return
+    }
+
+    const response = await projectApi.synchronizePreparationStatus(selectedProjectId)
+    if (!response.ok) {
+      const body = await response.json().catch(() => null) as { detail?: string; message?: string } | null
+      setError(body?.detail ?? body?.message ?? `프로젝트 상태 보정 실패: ${response.status}`)
+      return
+    }
+
+    await response.json()
+    await loadProjects(keyword)
+    const summaryResponse = await projectApi.integratedSummary(selectedProjectId)
+    if (summaryResponse.ok) setSummary(await summaryResponse.json())
+    setError(null)
+  }
+
   async function loadCustomerContract(projectId: string) {
     try {
       const response = await contractApi.get(projectId)
@@ -442,6 +482,12 @@ function App() {
       setError(message || `대표 금액 정정 실패: ${response.status}`)
       return
     }
+    const changeOrder: ChangeOrder = await response.json()
+    if (changeOrder.requires_reconciliation) {
+      await loadChangeOrders(selectedProjectId)
+      setError(`계약 변경안은 저장됐지만 ${changeOrder.reconciliation_message ?? '기성·지급 이력과 충돌해 조정이 필요합니다.'}`)
+      return
+    }
     await Promise.all([
       loadCustomerContract(selectedProjectId),
       loadExecutionBudgetDetails(selectedProjectId),
@@ -517,6 +563,7 @@ function App() {
     const decidedApproval: ApprovalItem = await response.json()
     setSelectedApproval(decidedApproval)
     await loadApprovals()
+    await loadProjects(keyword)
     if (selectedProjectId) {
       await loadExecutionBudgetDetails(selectedProjectId)
       if (selectedExecutionItemId) await loadVendorComparisons(selectedProjectId, selectedExecutionItemId)
@@ -604,8 +651,8 @@ function App() {
     setPurchaseOrderHistory(data.items)
   }
 
-  async function saveVendorComparisons() {
-    if (!selectedProjectId || !selectedExecutionItemId) return
+  async function persistVendorComparisons(): Promise<VendorComparisonResponse | null> {
+    if (!selectedProjectId || !selectedExecutionItemId) return null
     const response = await procurementApi.saveComparisons(selectedProjectId, selectedExecutionItemId, {
       comparisons: vendorComparisons
         .filter((comparison) => comparison.vendor_name.trim())
@@ -613,7 +660,7 @@ function App() {
           comparison_code: comparison.comparison_code,
           vendor_name: comparison.vendor_name,
           quoted_amount: comparison.quoted_amount,
-          vat_type: comparison.vat_type,
+          vat_type: comparison.vat_type || '별도',
           construction_period: comparison.construction_period ?? '',
           scope_and_notes: comparison.scope_and_notes ?? '',
           payment_terms: comparison.payment_terms ?? '',
@@ -624,22 +671,35 @@ function App() {
     })
     if (!response.ok) {
       setError(`업체 비교견적 저장 실패: ${response.status}`)
-      return
+      return null
     }
     const data: VendorComparisonResponse = await response.json()
     setVendorComparison(data)
     setVendorComparisons(data.comparisons.length > 0 ? data.comparisons : [newVendorComparison(selectedExecutionItemId, 'A')])
     await loadPurchaseOrderDraft(selectedProjectId, selectedExecutionItemId, false)
+    return data
+  }
+
+  async function saveVendorComparisons() {
+    await persistVendorComparisons()
   }
 
   async function requestPurchaseOrder() {
     if (!selectedProjectId || !selectedExecutionItemId) return
+    const selected = vendorComparisons.find((comparison) => comparison.is_selected)
+    if (!selected || !selected.vendor_name.trim() || selected.quoted_amount <= 0 || !selected.selection_reason?.trim()) {
+      setError('발주품의를 요청하려면 업체명, 견적금액, 선정 업체, 선정 사유를 모두 입력해야 합니다.')
+      return
+    }
+    const saved = await persistVendorComparisons()
+    if (!saved) return
     const response = await procurementApi.requestDraft(selectedProjectId, selectedExecutionItemId)
     if (!response.ok) {
       setError(`발주품의 요청 실패: ${response.status}`)
       return
     }
     setPurchaseOrderDraft(await response.json())
+    await loadExecutionBudgetDetails(selectedProjectId)
     await loadApprovals()
   }
 
@@ -654,6 +714,33 @@ function App() {
         return { ...item, [field]: value }
       }),
     )
+  }
+
+  async function uploadVendorComparisonFile(index: number, file: File) {
+    if (!selectedProjectId || !selectedExecutionItemId) return
+    const saved = await persistVendorComparisons()
+    const comparison = saved?.comparisons[index]
+    if (!comparison?.comparison_id) {
+      setError('업체명 입력 후 비교견적을 저장해야 파일을 첨부할 수 있습니다.')
+      return
+    }
+    const response = await procurementApi.uploadComparisonAttachment(
+      selectedProjectId,
+      selectedExecutionItemId,
+      comparison.comparison_id,
+      file,
+    )
+    if (!response.ok) {
+      setError(`비교견적 파일 첨부 실패: ${response.status}`)
+      return
+    }
+    const attachment = await response.json()
+    const attach = (items: VendorComparisonItem[]) => items.map((item, itemIndex) =>
+      itemIndex === index ? { ...item, attachments: [...(item.attachments ?? []), attachment] } : item,
+    )
+    setVendorComparisons(attach)
+    setVendorComparison((current) => current ? { ...current, comparisons: attach(current.comparisons) } : current)
+    setError(null)
   }
 
   function addVendorComparison() {
@@ -672,7 +759,9 @@ function App() {
       const data: ProgressPaymentResponse = await response.json()
       setProgressPayment(data)
       if (!selectedPoId && data.purchaseOrders.length > 0) {
-        setSelectedPoId(data.purchaseOrders[0].po_id)
+        const firstPurchaseOrder = data.purchaseOrders[0]
+        setSelectedPoId(firstPurchaseOrder.po_id)
+        setClaimForm({ degree: '1', claim_amount: String(firstPurchaseOrder.current_po_amount) })
       }
       setError(null)
       return data
@@ -731,18 +820,7 @@ function App() {
     }
     const data: ProgressPaymentResponse = await response.json()
     setProgressPayment(data)
-    setClaimForm({ degree: String((Number(claimForm.degree || 0) || 0) + 1), claim_amount: '0' })
-    await loadSettlement(selectedProjectId)
-  }
-
-  async function approveProgressClaim(claimId: string) {
-    if (!selectedProjectId) return
-    const response = await paymentApi.approveClaim(selectedProjectId, claimId)
-    if (!response.ok) {
-      setError(`기성 승인 실패: ${response.status}`)
-      return
-    }
-    setProgressPayment(await response.json())
+    setClaimForm({ degree: '1', claim_amount: '0' })
     await loadSettlement(selectedProjectId)
   }
 
@@ -826,6 +904,7 @@ function App() {
         category_name: detail.category_name,
         item_name: detail.item_name,
 		approval_status: executionBudget?.approval_status ?? 'DRAFT',
+		purchase_order_status: 'NOT_REQUESTED',
         rolled_up_amount: 0,
       }
       current.category_name = detail.category_name
@@ -928,6 +1007,24 @@ function App() {
                     <span className="rounded-full bg-cyan-100 px-2.5 py-1 text-xs font-semibold text-cyan-800">
                       {selectedProject.status}
                     </span>
+                  )}
+                  {selectedProject?.status === '공사준비' && (
+                    <button
+                      type="button"
+                      onClick={startConstruction}
+                      className="rounded-md bg-cyan-700 px-3 py-1.5 text-xs font-semibold text-white hover:bg-cyan-800"
+                    >
+                      공사 시작
+                    </button>
+                  )}
+                  {selectedProject?.status === '계약' && executionBudget?.approval_status === 'APPROVED' && (
+                    <button
+                      type="button"
+                      onClick={synchronizePreparationStatus}
+                      className="rounded-md border border-cyan-700 px-3 py-1.5 text-xs font-semibold text-cyan-800 hover:bg-cyan-50"
+                    >
+                      실행예산 승인 반영
+                    </button>
                   )}
                 </div>
                 <p className="mt-2 text-sm text-slate-600">
@@ -1050,6 +1147,7 @@ function App() {
                     updateVendorComparison={updateVendorComparison}
                     addVendorComparison={addVendorComparison}
                     removeVendorComparison={removeVendorComparison}
+                    uploadVendorComparisonFile={uploadVendorComparisonFile}
                     openPurchaseOrderHistory={() => moveToTab('계약/발주 이력')}
                   />
                 )}
@@ -1060,13 +1158,16 @@ function App() {
                   <ProgressPaymentPanel
                     progressPayment={progressPayment}
                     selectedPoId={selectedPoId}
-                    setSelectedPoId={setSelectedPoId}
+                    setSelectedPoId={(poId) => {
+                      setSelectedPoId(poId)
+                      const purchaseOrder = progressPayment.purchaseOrders.find((item) => item.po_id === poId)
+                      setClaimForm({ degree: '1', claim_amount: String(purchaseOrder?.current_po_amount ?? 0) })
+                    }}
                     claimForm={claimForm}
                     setClaimForm={setClaimForm}
                     selectedPaymentPoIds={selectedPaymentPoIds}
                     setSelectedPaymentPoIds={setSelectedPaymentPoIds}
                     createProgressClaim={createProgressClaim}
-                    approveProgressClaim={approveProgressClaim}
                     requestPaymentApprovals={requestPaymentApprovals}
                   />
                 )}

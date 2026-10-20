@@ -9,6 +9,7 @@ import com.construction.management.project.domain.ContractChange;
 import com.construction.management.project.domain.ApprovalStatus;
 import com.construction.management.project.domain.CustomerContractItem;
 import com.construction.management.project.domain.Project;
+import com.construction.management.project.domain.ProjectStatus;
 import com.construction.management.project.repository.ContractFileRepository;
 import com.construction.management.project.repository.ContractChangeRepository;
 import com.construction.management.project.repository.CustomerContractItemRepository;
@@ -77,6 +78,10 @@ public class CustomerContractService {
 				))
 				.toList();
 		itemRepository.saveAll(items);
+		if (project.getStatus() == ProjectStatus.견적 && !items.isEmpty()) {
+			project.changeStatus(ProjectStatus.계약);
+			projectRepository.save(project);
+		}
 
 		return toResponse(project);
 	}

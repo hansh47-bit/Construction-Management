@@ -23,6 +23,8 @@ import java.util.UUID;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.util.StringUtils;
+import org.springframework.http.HttpStatus;
+import org.springframework.web.server.ResponseStatusException;
 
 @Service
 public class VendorComparisonService {
@@ -34,8 +36,9 @@ public class VendorComparisonService {
 	private final ProjectSettlementService projectSettlementService;
 	private final ApprovalService approvalService;
 	private final BudgetChangeRepository budgetChangeRepository;
+	private final VendorComparisonAttachmentService attachmentService;
 
-	public VendorComparisonService(ProjectRepository projectRepository, ProjectExecutionBudgetItemRepository budgetItemRepository, VendorComparisonRepository comparisonRepository, PoRequisitionRepository requisitionRepository, PurchaseOrderRepository purchaseOrderRepository, ProjectSettlementService projectSettlementService, ApprovalService approvalService, BudgetChangeRepository budgetChangeRepository) {
+	public VendorComparisonService(ProjectRepository projectRepository, ProjectExecutionBudgetItemRepository budgetItemRepository, VendorComparisonRepository comparisonRepository, PoRequisitionRepository requisitionRepository, PurchaseOrderRepository purchaseOrderRepository, ProjectSettlementService projectSettlementService, ApprovalService approvalService, BudgetChangeRepository budgetChangeRepository, VendorComparisonAttachmentService attachmentService) {
 		this.projectRepository = projectRepository;
 		this.budgetItemRepository = budgetItemRepository;
 		this.comparisonRepository = comparisonRepository;
@@ -44,6 +47,7 @@ public class VendorComparisonService {
 		this.projectSettlementService = projectSettlementService;
 		this.approvalService = approvalService;
 		this.budgetChangeRepository = budgetChangeRepository;
+		this.attachmentService = attachmentService;
 	}
 
 	@Transactional(readOnly = true)
@@ -100,6 +104,23 @@ public class VendorComparisonService {
 		return toResponse(project, item);
 	}
 
+	@Transactional
+	public com.construction.management.project.api.ApprovalResponse.Attachment uploadAttachment(
+			String projectId, String itemId, String comparisonId, org.springframework.web.multipart.MultipartFile file
+	) {
+		projectSettlementService.assertNotSettled(projectId);
+		getItem(projectId, itemId);
+		requisitionRepository.findTopByProjectIdAndExecutionItemIdOrderByCreatedAtDesc(projectId, itemId)
+				.filter(requisition -> ApprovalStatus.REQUESTED.name().equals(requisition.getApprovalStatus()) || ApprovalStatus.APPROVED.name().equals(requisition.getApprovalStatus()))
+				.ifPresent(requisition -> { throw new IllegalStateException("결재 대기 또는 승인된 발주품의의 비교견적에는 파일을 추가할 수 없습니다."); });
+		VendorComparison comparison = comparisonRepository.findById(comparisonId)
+				.orElseThrow(() -> new EntityNotFoundException("비교견적을 먼저 저장한 후 파일을 올려 주세요."));
+		if (!projectId.equals(comparison.getProjectId()) || !itemId.equals(comparison.getExecutionItemId())) {
+			throw new EntityNotFoundException("현재 실행항목에 속하지 않는 비교견적입니다.");
+		}
+		return attachmentService.save(projectId, itemId, comparisonId, file);
+	}
+
 	@Transactional(readOnly = true)
 	public PurchaseOrderDraftResponse getPurchaseOrderDraft(String projectId, String itemId) {
 		Project project = getProject(projectId);
@@ -119,7 +140,7 @@ public class VendorComparisonService {
 			throw new IllegalStateException("실행예산 승인 후 발주품의를 요청할 수 있습니다.");
 		}
 		VendorComparison selected = comparisonRepository.findByProjectIdAndExecutionItemIdAndSelectedTrue(projectId, itemId)
-				.orElseThrow(() -> new EntityNotFoundException("선정된 비교견적이 없습니다."));
+				.orElseThrow(() -> new ResponseStatusException(HttpStatus.CONFLICT, "선정 업체를 저장한 후 발주품의를 요청할 수 있습니다."));
 		if (!StringUtils.hasText(selected.getSelectionReason())) {
 			throw new IllegalArgumentException("발주품의 요청 전 선정 사유가 필요합니다.");
 		}
@@ -166,9 +187,10 @@ public class VendorComparisonService {
 								comparison.getVatType(),
 								comparison.getConstructionPeriod(),
 								comparison.getScopeAndNotes(),
-								comparison.getPaymentTerms(),
-								comparison.getEstimateFileUrl(),
-								comparison.isSelected(),
+							comparison.getPaymentTerms(),
+							comparison.getEstimateFileUrl(),
+							attachmentService.getResponses(project.getProjectId(), budgetItemId, comparison.getComparisonId()),
+							comparison.isSelected(),
 								comparison.getSelectionReason(),
 								comparison.getQuotedAmount().subtract(budgetAmount)
 						))

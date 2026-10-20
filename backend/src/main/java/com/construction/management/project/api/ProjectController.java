@@ -2,6 +2,7 @@ package com.construction.management.project.api;
 
 import com.construction.management.project.domain.ContractFile;
 import com.construction.management.project.domain.ExecutionBudgetApprovalAttachment;
+import com.construction.management.project.domain.VendorComparisonAttachment;
 import com.construction.management.project.service.ApprovalService;
 import com.construction.management.project.service.CustomerContractService;
 import com.construction.management.project.service.ChangeManagementService;
@@ -13,6 +14,7 @@ import com.construction.management.project.service.ProgressPaymentService;
 import com.construction.management.project.service.PurchaseOrderService;
 import com.construction.management.project.service.PaymentRequestService;
 import com.construction.management.project.service.VendorComparisonService;
+import com.construction.management.project.service.VendorComparisonAttachmentService;
 import jakarta.validation.Valid;
 import java.nio.charset.StandardCharsets;
 import java.util.List;
@@ -51,6 +53,7 @@ public class ProjectController {
 	private final PaymentRequestService paymentRequestService;
 	private final ApprovalService approvalService;
 	private final ExecutionBudgetApprovalAttachmentService executionBudgetApprovalAttachmentService;
+	private final VendorComparisonAttachmentService vendorComparisonAttachmentService;
 
 	public ProjectController(
 			ProjectService projectService,
@@ -63,7 +66,8 @@ public class ProjectController {
 			PurchaseOrderService purchaseOrderService,
 			PaymentRequestService paymentRequestService,
 			ApprovalService approvalService,
-			ExecutionBudgetApprovalAttachmentService executionBudgetApprovalAttachmentService
+			ExecutionBudgetApprovalAttachmentService executionBudgetApprovalAttachmentService,
+			VendorComparisonAttachmentService vendorComparisonAttachmentService
 	) {
 		this.projectService = projectService;
 		this.customerContractService = customerContractService;
@@ -76,6 +80,7 @@ public class ProjectController {
 		this.paymentRequestService = paymentRequestService;
 		this.approvalService = approvalService;
 		this.executionBudgetApprovalAttachmentService = executionBudgetApprovalAttachmentService;
+		this.vendorComparisonAttachmentService = vendorComparisonAttachmentService;
 	}
 
 	@PostMapping
@@ -93,6 +98,16 @@ public class ProjectController {
 	@ResponseStatus(HttpStatus.NO_CONTENT)
 	public void delete(@PathVariable("projectId") String projectId) {
 		projectService.delete(projectId);
+	}
+
+	@PostMapping("/{projectId}/start-construction")
+	public ProjectResponse startConstruction(@PathVariable("projectId") String projectId) {
+		return projectService.startConstruction(projectId);
+	}
+
+	@PostMapping("/{projectId}/synchronize-preparation-status")
+	public ProjectResponse synchronizePreparationStatus(@PathVariable("projectId") String projectId) {
+		return projectService.synchronizePreparationStatus(projectId);
 	}
 
 	@GetMapping("/{projectId}/integrated-summary")
@@ -240,6 +255,42 @@ public class ProjectController {
 		return vendorComparisonService.saveComparisons(projectId, itemId, request);
 	}
 
+	@PostMapping(path = "/{projectId}/execution-items/{itemId}/comparisons/{comparisonId}/attachments", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
+	public ApprovalResponse.Attachment uploadVendorComparisonAttachment(
+			@PathVariable("projectId") String projectId,
+			@PathVariable("itemId") String itemId,
+			@PathVariable("comparisonId") String comparisonId,
+			@RequestParam("file") MultipartFile file
+	) {
+		return vendorComparisonService.uploadAttachment(projectId, itemId, comparisonId, file);
+	}
+
+	@GetMapping("/{projectId}/execution-items/{itemId}/comparison-attachments/{attachmentId}")
+	public ResponseEntity<Resource> downloadVendorComparisonAttachment(
+			@PathVariable("projectId") String projectId,
+			@PathVariable("itemId") String itemId,
+			@PathVariable("attachmentId") String attachmentId
+	) {
+		VendorComparisonAttachment attachment = vendorComparisonAttachmentService.getFile(projectId, itemId, attachmentId);
+		Resource resource = vendorComparisonAttachmentService.loadFileResource(attachment);
+		return ResponseEntity.ok()
+				.header(HttpHeaders.CONTENT_DISPOSITION, ContentDisposition.attachment()
+						.filename(attachment.getFileName(), StandardCharsets.UTF_8).build().toString())
+				.cacheControl(CacheControl.noStore().mustRevalidate())
+				.contentType(resolveVendorComparisonAttachmentContentType(attachment))
+				.body(resource);
+	}
+
+	private MediaType resolveVendorComparisonAttachmentContentType(VendorComparisonAttachment attachment) {
+		try {
+			return attachment.getContentType() == null || attachment.getContentType().isBlank()
+					? MediaType.APPLICATION_OCTET_STREAM
+					: MediaType.parseMediaType(attachment.getContentType());
+		} catch (IllegalArgumentException ex) {
+			return MediaType.APPLICATION_OCTET_STREAM;
+		}
+	}
+
 	@GetMapping("/{projectId}/purchase-orders/draft/{itemId}")
 	public PurchaseOrderDraftResponse getPurchaseOrderDraft(
 			@PathVariable("projectId") String projectId,
@@ -291,14 +342,6 @@ public class ProjectController {
 			@RequestBody ProgressPaymentRequest.Claim request
 	) {
 		return progressPaymentService.createClaim(projectId, request);
-	}
-
-	@PostMapping("/{projectId}/progress-claims/{claimId}/approve")
-	public ProgressPaymentResponse approveProgressClaim(
-			@PathVariable("projectId") String projectId,
-			@PathVariable("claimId") String claimId
-	) {
-		return progressPaymentService.approveClaim(projectId, claimId);
 	}
 
 	@PostMapping("/{projectId}/progress-claims/{claimId}/payments")
