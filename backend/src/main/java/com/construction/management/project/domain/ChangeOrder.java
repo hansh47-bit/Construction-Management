@@ -51,4 +51,8 @@ public class ChangeOrder {
 	public String getRequestedBy() { return requestedBy; }
 	public String getStatus() { return status; }
 	public LocalDateTime getCreatedAt() { return createdAt; }
+
+	public void markReconciliationRequired() {
+		this.status = "RECONCILIATION_REQUIRED";
+	}
 }

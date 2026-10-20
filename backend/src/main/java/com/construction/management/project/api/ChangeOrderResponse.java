@@ -16,6 +16,8 @@ public record ChangeOrderResponse(
 		@JsonProperty("contract_delta_amount") BigDecimal contractDeltaAmount,
 		@JsonProperty("budget_delta_amount") BigDecimal budgetDeltaAmount,
 		@JsonProperty("purchase_order_delta_amount") BigDecimal purchaseOrderDeltaAmount,
+		@JsonProperty("requires_reconciliation") boolean requiresReconciliation,
+		@JsonProperty("reconciliation_message") String reconciliationMessage,
 		List<Impact> impacts
 ) {
 	public record Impact(String category, @JsonProperty("target_id") String targetId, String label, @JsonProperty("delta_amount") BigDecimal deltaAmount) { }
