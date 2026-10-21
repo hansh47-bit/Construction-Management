@@ -21,6 +21,10 @@ public class PurchaseOrder {
 	@Column(name = "budget_id", length = 64)
 	private String budgetId;
 
+	/** The approved execution-budget revision this order belongs to. Null is the original budget. */
+	@Column(name = "revision_id", length = 64)
+	private String revisionId;
+
 	@Column(name = "vendor_name", nullable = false)
 	private String vendorName;
 
@@ -79,6 +83,7 @@ public class PurchaseOrder {
 
 	public PurchaseOrder(String poId, String projectId, String budgetId, PoRequisition requisition, VendorComparison selectedComparison, String approver, String approvalComment) {
 		this(poId, projectId, budgetId, selectedComparison.getVendorName(), requisition.getPoAmount());
+		this.revisionId = requisition.getRevisionId();
 		this.requisitionId = requisition.getRequisitionId();
 		this.approvalId = requisition.getApprovalId();
 		this.selectedComparisonId = selectedComparison.getComparisonId();
@@ -113,6 +118,8 @@ public class PurchaseOrder {
 	public BigDecimal getInitialPoAmount() {
 		return initialPoAmount;
 	}
+
+	public String getRevisionId() { return revisionId; }
 
 	public String getRequisitionId() { return requisitionId; }
 	public String getApprovalId() { return approvalId; }

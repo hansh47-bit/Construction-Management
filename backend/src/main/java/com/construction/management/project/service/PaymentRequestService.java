@@ -8,12 +8,14 @@ import com.construction.management.project.domain.ApprovalStatus;
 import com.construction.management.project.domain.PaymentRequest;
 import com.construction.management.project.domain.ProgressClaim;
 import com.construction.management.project.domain.Project;
+import com.construction.management.project.domain.ProjectRevision;
 import com.construction.management.project.domain.PurchaseOrder;
 import com.construction.management.project.repository.ActualPaymentRepository;
 import com.construction.management.project.repository.ApprovalRepository;
 import com.construction.management.project.repository.PaymentRequestRepository;
 import com.construction.management.project.repository.ProgressClaimRepository;
 import com.construction.management.project.repository.ProjectRepository;
+import com.construction.management.project.repository.ProjectRevisionRepository;
 import com.construction.management.project.repository.PurchaseOrderRepository;
 import jakarta.persistence.EntityNotFoundException;
 import java.math.BigDecimal;
@@ -29,6 +31,7 @@ import org.springframework.transaction.annotation.Transactional;
 public class PaymentRequestService {
 	public static final String TYPE_PAYMENT = "PAYMENT";
 	private final ProjectRepository projectRepository;
+	private final ProjectRevisionRepository revisionRepository;
 	private final PurchaseOrderRepository purchaseOrderRepository;
 	private final ProgressClaimRepository progressClaimRepository;
 	private final ActualPaymentRepository actualPaymentRepository;
@@ -36,8 +39,9 @@ public class PaymentRequestService {
 	private final ApprovalRepository approvalRepository;
 	private final ProjectSettlementService projectSettlementService;
 
-	public PaymentRequestService(ProjectRepository projectRepository, PurchaseOrderRepository purchaseOrderRepository, ProgressClaimRepository progressClaimRepository, ActualPaymentRepository actualPaymentRepository, PaymentRequestRepository paymentRequestRepository, ApprovalRepository approvalRepository, ProjectSettlementService projectSettlementService) {
+	public PaymentRequestService(ProjectRepository projectRepository, ProjectRevisionRepository revisionRepository, PurchaseOrderRepository purchaseOrderRepository, ProgressClaimRepository progressClaimRepository, ActualPaymentRepository actualPaymentRepository, PaymentRequestRepository paymentRequestRepository, ApprovalRepository approvalRepository, ProjectSettlementService projectSettlementService) {
 		this.projectRepository = projectRepository;
+		this.revisionRepository = revisionRepository;
 		this.purchaseOrderRepository = purchaseOrderRepository;
 		this.progressClaimRepository = progressClaimRepository;
 		this.actualPaymentRepository = actualPaymentRepository;
@@ -56,6 +60,10 @@ public class PaymentRequestService {
 			PurchaseOrder po = purchaseOrderRepository.findById(poId).orElseThrow(() -> new EntityNotFoundException("발주를 찾을 수 없습니다: " + poId));
 			if (!projectId.equals(po.getProjectId())) throw new IllegalArgumentException("다른 프로젝트의 업체는 지급요청할 수 없습니다.");
 			if (paymentRequestRepository.existsByProjectIdAndPoIdAndApprovalStatus(projectId, poId, ApprovalStatus.REQUESTED.name())) throw new IllegalArgumentException("이미 지급결재 대기 중인 업체입니다: " + po.getVendorName());
+			ProjectRevision revision = currentRevision(projectId);
+			if (!java.util.Objects.equals(revision == null ? null : revision.getRevisionId(), po.getRevisionId())) {
+				throw new IllegalArgumentException("현재 승인 차수의 신규 발주만 지급 요청할 수 있습니다.");
+			}
 			List<ProgressClaim> payableClaims = progressClaimRepository.findByPoId(poId).stream()
 					.filter(claim -> claim.getApprovalStatus() == ApprovalStatus.APPROVED)
 					.filter(claim -> remaining(claim).signum() > 0)
@@ -98,6 +106,10 @@ public class PaymentRequestService {
 	private BigDecimal remaining(ProgressClaim claim) {
 		BigDecimal paid = actualPaymentRepository.findByClaimId(claim.getClaimId()).stream().map(ActualPayment::getPaidAmount).reduce(BigDecimal.ZERO, BigDecimal::add);
 		return claim.getClaimAmount().subtract(paid);
+	}
+
+	private ProjectRevision currentRevision(String projectId) {
+		return revisionRepository.findTopByProjectIdAndStatusOrderByRevisionNumberDesc(projectId, "APPROVED").orElse(null);
 	}
 
 	private String nextApprovalId() {

@@ -14,6 +14,7 @@ function approvalTypeLabel(type: string) {
   if (type === 'EXECUTION_BUDGET') return '실행예산'
   if (type === 'PURCHASE_ORDER') return '발주품의'
   if (type === 'PAYMENT') return '지급'
+  if (type === 'PROJECT_REVISION') return '계약·실행예산 변경'
   return type
 }
 
@@ -148,7 +149,7 @@ export function ApprovalInboxPanel({
       <div className="flex flex-col gap-4 border-b border-slate-200 pb-4 lg:flex-row lg:items-center lg:justify-between">
         <div>
           <h3 className="text-lg font-semibold text-slate-950">통합결재함</h3>
-          <p className="mt-1 text-sm text-slate-500">실행예산과 발주품의 결재를 한 화면에서 승인하거나 반려합니다.</p>
+          <p className="mt-1 text-sm text-slate-500">실행예산, 변경 차수, 발주품의 결재를 한 화면에서 승인하거나 반려합니다.</p>
         </div>
         <div className="flex flex-wrap gap-2">
           <select value={statusFilter} onChange={(event) => setStatusFilter(event.target.value)} className="input w-36">
@@ -161,6 +162,7 @@ export function ApprovalInboxPanel({
           <select value={typeFilter} onChange={(event) => setTypeFilter(event.target.value)} className="input w-44">
             <option value="">전체 유형</option>
             <option value="EXECUTION_BUDGET">실행예산</option>
+            <option value="PROJECT_REVISION">계약·실행예산 변경</option>
             <option value="PURCHASE_ORDER">발주</option>
             <option value="PROGRESS_CLAIM">기성 승인</option>
           </select>

@@ -9,6 +9,7 @@ import com.construction.management.project.service.ChangeManagementService;
 import com.construction.management.project.service.ExecutionBudgetDetailService;
 import com.construction.management.project.service.ExecutionBudgetApprovalAttachmentService;
 import com.construction.management.project.service.ProjectService;
+import com.construction.management.project.service.ProjectRevisionService;
 import com.construction.management.project.service.ProjectSettlementService;
 import com.construction.management.project.service.ProgressPaymentService;
 import com.construction.management.project.service.PurchaseOrderService;
@@ -43,6 +44,7 @@ import org.springframework.web.multipart.MultipartFile;
 public class ProjectController {
 
 	private final ProjectService projectService;
+	private final ProjectRevisionService projectRevisionService;
 	private final CustomerContractService customerContractService;
 	private final ChangeManagementService changeManagementService;
 	private final ExecutionBudgetDetailService executionBudgetDetailService;
@@ -57,6 +59,7 @@ public class ProjectController {
 
 	public ProjectController(
 			ProjectService projectService,
+			ProjectRevisionService projectRevisionService,
 			CustomerContractService customerContractService,
 			ChangeManagementService changeManagementService,
 			ExecutionBudgetDetailService executionBudgetDetailService,
@@ -70,6 +73,7 @@ public class ProjectController {
 			VendorComparisonAttachmentService vendorComparisonAttachmentService
 	) {
 		this.projectService = projectService;
+		this.projectRevisionService = projectRevisionService;
 		this.customerContractService = customerContractService;
 		this.changeManagementService = changeManagementService;
 		this.executionBudgetDetailService = executionBudgetDetailService;
@@ -128,12 +132,109 @@ public class ProjectController {
 		return customerContractService.saveContract(projectId, request);
 	}
 
-	@PostMapping("/{projectId}/change-orders/executive-correction")
-	public ChangeOrderResponse correctAmountByExecutive(
+	@PostMapping("/{projectId}/revisions")
+	@ResponseStatus(HttpStatus.CREATED)
+	public ProjectRevisionResponse createRevision(
 			@PathVariable("projectId") String projectId,
-			@Valid @RequestBody ExecutiveCorrectionRequest request
+			@Valid @RequestBody ProjectRevisionCreateRequest request
 	) {
-		return changeManagementService.correctByExecutive(projectId, request);
+		return projectRevisionService.create(projectId, request);
+	}
+
+	@GetMapping("/{projectId}/revisions")
+	public List<ProjectRevisionResponse> getRevisions(@PathVariable("projectId") String projectId) {
+		return projectRevisionService.list(projectId);
+	}
+
+	@GetMapping("/{projectId}/revisions/{revisionId}")
+	public ProjectRevisionResponse getRevision(
+			@PathVariable("projectId") String projectId,
+			@PathVariable("revisionId") String revisionId
+	) {
+		return projectRevisionService.get(projectId, revisionId);
+	}
+
+	@PutMapping("/{projectId}/revisions/{revisionId}/contract")
+	public ProjectRevisionResponse saveRevisionContract(
+			@PathVariable("projectId") String projectId,
+			@PathVariable("revisionId") String revisionId,
+			@Valid @RequestBody CustomerContractRequest request
+	) {
+		return projectRevisionService.saveContract(projectId, revisionId, request);
+	}
+
+	@PutMapping("/{projectId}/revisions/{revisionId}/execution-budget")
+	public ProjectRevisionResponse saveRevisionExecutionBudget(
+			@PathVariable("projectId") String projectId,
+			@PathVariable("revisionId") String revisionId,
+			@Valid @RequestBody ExecutionBudgetDetailRequest request
+	) {
+		return projectRevisionService.saveBudget(projectId, revisionId, request);
+	}
+
+	@PostMapping("/{projectId}/revisions/{revisionId}/request-approval")
+	public ApprovalResponse requestRevisionApproval(
+			@PathVariable("projectId") String projectId,
+			@PathVariable("revisionId") String revisionId,
+			@RequestBody(required = false) ApprovalRequest request
+	) {
+		return projectRevisionService.requestApproval(projectId, revisionId, request);
+	}
+
+	@GetMapping("/{projectId}/revisions/procurement-items")
+	public ProjectRevisionProcurementResponse getRevisionProcurementItems(@PathVariable("projectId") String projectId) {
+		return projectRevisionService.procurementItemIds(projectId);
+	}
+
+	@PostMapping("/{projectId}/change-orders")
+	@ResponseStatus(HttpStatus.CREATED)
+	public ChangeOrderResponse createChangeOrder(
+			@PathVariable("projectId") String projectId,
+			@Valid @RequestBody ChangeOrderCreateRequest request
+	) {
+		return changeManagementService.createChangeOrder(projectId, request);
+	}
+
+	@PostMapping("/{projectId}/change-orders/{changeOrderId}/contract-changes")
+	public ChangeOrderResponse saveContractChange(
+			@PathVariable("projectId") String projectId,
+			@PathVariable("changeOrderId") String changeOrderId,
+			@Valid @RequestBody ContractChangeRequest request
+	) {
+		return changeManagementService.saveContractProposal(projectId, changeOrderId, request);
+	}
+
+	@PostMapping("/{projectId}/change-orders/{changeOrderId}/budget-proposals")
+	public ChangeOrderResponse saveBudgetProposal(
+			@PathVariable("projectId") String projectId,
+			@PathVariable("changeOrderId") String changeOrderId,
+			@Valid @RequestBody BudgetChangeProposalRequest request
+	) {
+		return changeManagementService.saveBudgetProposal(projectId, changeOrderId, request);
+	}
+
+	@PostMapping("/{projectId}/change-orders/{changeOrderId}/budget-changes/request-approval")
+	public ChangeOrderResponse requestChangeApproval(
+			@PathVariable("projectId") String projectId,
+			@PathVariable("changeOrderId") String changeOrderId
+	) {
+		return changeManagementService.requestApproval(projectId, changeOrderId);
+	}
+
+	@GetMapping("/{projectId}/change-orders/{changeOrderId}/impact-summary")
+	public ChangeOrderResponse getChangeImpactSummary(
+			@PathVariable("projectId") String projectId,
+			@PathVariable("changeOrderId") String changeOrderId
+	) {
+		return changeManagementService.getImpactSummary(projectId, changeOrderId);
+	}
+
+	@GetMapping("/{projectId}/change-orders/{changeOrderId}/reconciliation")
+	public ChangeOrderResponse getChangeReconciliation(
+			@PathVariable("projectId") String projectId,
+			@PathVariable("changeOrderId") String changeOrderId
+	) {
+		return changeManagementService.getReconciliation(projectId, changeOrderId);
 	}
 
 	@GetMapping("/{projectId}/change-orders")

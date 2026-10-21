@@ -6,6 +6,7 @@ import org.springframework.data.jpa.repository.JpaRepository;
 
 public interface ProjectSettlementRepository extends JpaRepository<ProjectSettlement, String> {
 	Optional<ProjectSettlement> findByProjectId(String projectId);
+	Optional<ProjectSettlement> findByProjectIdAndRevisionId(String projectId, String revisionId);
 	boolean existsByProjectId(String projectId);
 	void deleteByProjectId(String projectId);
 }

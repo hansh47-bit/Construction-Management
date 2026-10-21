@@ -42,12 +42,26 @@ export function ProgressPaymentPanel({
     .filter((po) => po.approved_unpaid_amount > 0 && po.payment_request_status !== 'REQUESTED')
     .map((po) => po.po_id)
 
+  if (!selectedPo && progressPayment.revision_number) {
+    return (
+      <div className="rounded-md border border-dashed border-cyan-300 bg-cyan-50 p-8 text-center text-sm text-cyan-900">
+        <p className="font-semibold">{progressPayment.revision_number}차 기성·지급 현황에는 아직 신규 발주가 없습니다.</p>
+        <p className="mt-1">{progressPayment.revision_number}차 실행예산 기준으로 업체 비교견적과 발주 승인을 새로 진행한 뒤 기성·지급을 작성하세요.</p>
+      </div>
+    )
+  }
+
   if (!selectedPo) {
     return <div className="rounded-md border border-dashed border-slate-300 bg-slate-50 p-8 text-center text-sm text-slate-500">등록된 발주가 없습니다.</div>
   }
 
   return (
     <div>
+      {progressPayment.revision_number && (
+        <div className="mb-4 rounded-md border border-cyan-200 bg-cyan-50 px-4 py-3 text-sm text-cyan-900">
+          <strong>{progressPayment.revision_number}차 기성·지급 현황</strong>입니다. 이전 차수의 발주·기성·지급 기록은 현재 차수 집계에 포함하지 않습니다.
+        </div>
+      )}
       <div className="flex flex-col gap-4 border-b border-slate-200 pb-4 lg:flex-row lg:items-center lg:justify-between">
         <div>
           <h3 className="text-lg font-semibold text-slate-950">기성 및 지급 현황</h3>

@@ -14,7 +14,7 @@ export function ContractManagementPanel({
   setTargetProfitRate,
   setSelectedFileType,
   saveCustomerContract,
-  correctAmountByExecutive,
+  openChangeManagement,
   uploadContractFile,
   deleteContractFile,
   updateContractItem,
@@ -29,7 +29,7 @@ export function ContractManagementPanel({
   setTargetProfitRate: (value: string) => void
   setSelectedFileType: (value: string) => void
   saveCustomerContract: () => void
-  correctAmountByExecutive: () => void
+  openChangeManagement: () => void
   uploadContractFile: (file: File | null) => void
   deleteContractFile: (fileId: string) => void
   updateContractItem: (index: number, field: keyof CustomerContractItem, value: string) => void
@@ -46,10 +46,10 @@ export function ContractManagementPanel({
         <div className="flex flex-wrap gap-2">
           <button
             type="button"
-            onClick={correctAmountByExecutive}
+            onClick={openChangeManagement}
             className="inline-flex items-center justify-center gap-2 rounded-md border border-amber-500 bg-amber-50 px-4 py-2 text-sm font-semibold text-amber-800 hover:bg-amber-100"
           >
-            대표 금액 정정
+            계약 변경안 작성
           </button>
           <button
             type="button"

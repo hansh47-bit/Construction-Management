@@ -8,6 +8,7 @@ import org.springframework.data.jpa.repository.JpaRepository;
 public interface ContractChangeRepository extends JpaRepository<ContractChange, String> {
 	List<ContractChange> findByProjectIdAndApprovalStatus(String projectId, ApprovalStatus approvalStatus);
 	List<ContractChange> findByProjectId(String projectId);
+	List<ContractChange> findByChangeCode(String changeCode);
 	boolean existsByProjectId(String projectId);
 	void deleteByProjectId(String projectId);
 }

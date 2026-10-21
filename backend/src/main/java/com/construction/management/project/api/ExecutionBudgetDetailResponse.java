@@ -21,6 +21,8 @@ public record ExecutionBudgetDetailResponse(
 		String approvalId,
 		@JsonProperty("approval_comment")
 		String approvalComment,
+		@JsonProperty("applied_revision_number")
+		Integer appliedRevisionNumber,
 		@JsonProperty("approved_amount")
 		BigDecimal approvedAmount,
 		@JsonProperty("total_detail_amount")

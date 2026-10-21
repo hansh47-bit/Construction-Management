@@ -11,11 +11,17 @@ public record ProjectSettlementResponse(
 		String projectCode,
 		@JsonProperty("project_name")
 		String projectName,
+		@JsonProperty("revision_number")
+		Integer revisionNumber,
 		AmountSummary contract,
 		@JsonProperty("execution_budget")
 		AmountSummary executionBudget,
 		@JsonProperty("purchase_orders")
 		AmountSummary purchaseOrders,
+		@JsonProperty("settlement_expense")
+		BigDecimal settlementExpense,
+		@JsonProperty("settlement_tax")
+		BigDecimal settlementTax,
 		PaymentSummary payments,
 		Profitability profitability,
 		@JsonProperty("is_settled")

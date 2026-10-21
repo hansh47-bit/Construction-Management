@@ -15,6 +15,7 @@ import com.construction.management.project.domain.PoChange;
 import com.construction.management.project.domain.ProgressClaim;
 import com.construction.management.project.domain.Project;
 import com.construction.management.project.domain.ProjectExecutionBudgetItem;
+import com.construction.management.project.domain.ProjectRevision;
 import com.construction.management.project.domain.ProjectSettlement;
 import com.construction.management.project.domain.ProjectSettlement.ProjectSettlementSnapshot;
 import com.construction.management.project.domain.ProjectStatus;
@@ -29,6 +30,7 @@ import com.construction.management.project.repository.ProgressClaimRepository;
 import com.construction.management.project.repository.ProjectContractRepository;
 import com.construction.management.project.repository.ProjectExecutionBudgetItemRepository;
 import com.construction.management.project.repository.ProjectRepository;
+import com.construction.management.project.repository.ProjectRevisionRepository;
 import com.construction.management.project.repository.ProjectSettlementRepository;
 import com.construction.management.project.repository.PurchaseOrderRepository;
 import jakarta.persistence.EntityNotFoundException;
@@ -44,6 +46,7 @@ import org.springframework.util.StringUtils;
 @Service
 public class ProjectSettlementService {
 	private final ProjectRepository projectRepository;
+	private final ProjectRevisionRepository revisionRepository;
 	private final ProjectContractRepository projectContractRepository;
 	private final ContractChangeRepository contractChangeRepository;
 	private final CustomerContractItemRepository customerContractItemRepository;
@@ -58,6 +61,7 @@ public class ProjectSettlementService {
 
 	public ProjectSettlementService(
 			ProjectRepository projectRepository,
+			ProjectRevisionRepository revisionRepository,
 			ProjectContractRepository projectContractRepository,
 			ContractChangeRepository contractChangeRepository,
 			CustomerContractItemRepository customerContractItemRepository,
@@ -71,6 +75,7 @@ public class ProjectSettlementService {
 			ProjectSettlementRepository settlementRepository
 	) {
 		this.projectRepository = projectRepository;
+		this.revisionRepository = revisionRepository;
 		this.projectContractRepository = projectContractRepository;
 		this.contractChangeRepository = contractChangeRepository;
 		this.customerContractItemRepository = customerContractItemRepository;
@@ -87,16 +92,25 @@ public class ProjectSettlementService {
 	@Transactional(readOnly = true)
 	public ProjectSettlementResponse getSettlement(String projectId) {
 		Project project = getProject(projectId);
-		ProjectSettlementSnapshot snapshot = calculate(projectId);
-		ProjectSettlement settlement = settlementRepository.findByProjectId(projectId).orElse(null);
-		return toResponse(project, snapshot, settlement, settlement == null ? BigDecimal.ZERO : settlement.getUncollectedReceivable());
+		ProjectRevision revision = currentRevision(projectId);
+		ProjectSettlement settlement = settlementRepository.findByProjectIdAndRevisionId(projectId, revision == null ? null : revision.getRevisionId()).orElse(null);
+		ProjectSettlementSnapshot snapshot = calculate(projectId,
+				settlement == null ? BigDecimal.ZERO : settlement.getSettlementExpense(),
+				settlement == null ? BigDecimal.ZERO : settlement.getSettlementTax());
+		return toResponse(project, revision, snapshot, settlement, settlement == null ? BigDecimal.ZERO : settlement.getUncollectedReceivable());
 	}
 
 	@Transactional
 	public ProjectSettlementResponse completeSettlement(String projectId, ProjectSettlementCompleteRequest request) {
 		Project project = getProject(projectId);
-		ProjectSettlementSnapshot snapshot = calculate(projectId);
+		ProjectRevision revision = currentRevision(projectId);
 		BigDecimal uncollectedReceivable = defaultZero(request.uncollectedReceivable());
+		BigDecimal settlementExpense = defaultZero(request.settlementExpense());
+		BigDecimal settlementTax = defaultZero(request.settlementTax());
+		if (settlementExpense.signum() < 0 || settlementTax.signum() < 0) {
+			throw new IllegalArgumentException("준공정산 경비와 세금은 0원 이상이어야 합니다.");
+		}
+		ProjectSettlementSnapshot snapshot = calculate(projectId, settlementExpense, settlementTax);
 
 		if (snapshot.unpaidBalance().signum() > 0) {
 			if (!Boolean.TRUE.equals(request.forceCompleteIfUnpaid())) {
@@ -107,11 +121,13 @@ public class ProjectSettlementService {
 			}
 		}
 
-		ProjectSettlement settlement = settlementRepository.findByProjectId(projectId)
-				.orElseGet(() -> new ProjectSettlement(nextSettlementId(), projectId));
+		ProjectSettlement settlement = settlementRepository.findByProjectIdAndRevisionId(projectId, revision == null ? null : revision.getRevisionId())
+				.orElseGet(() -> new ProjectSettlement(nextSettlementId(), projectId, revision == null ? null : revision.getRevisionId()));
 		settlement.settle(
 				snapshot,
 				uncollectedReceivable,
+				settlementExpense,
+				settlementTax,
 				request.settlementNotes(),
 				request.unpaidHandlingReason(),
 				StringUtils.hasText(request.settledBy()) ? request.settledBy() : "system"
@@ -119,7 +135,7 @@ public class ProjectSettlementService {
 		settlementRepository.save(settlement);
 		project.changeStatus(ProjectStatus.정산완료);
 		projectRepository.save(project);
-		return toResponse(project, snapshot, settlement, uncollectedReceivable);
+		return toResponse(project, revision, snapshot, settlement, uncollectedReceivable);
 	}
 
 	public void assertNotSettled(String projectId) {
@@ -129,7 +145,7 @@ public class ProjectSettlementService {
 		}
 	}
 
-	private ProjectSettlementSnapshot calculate(String projectId) {
+	private ProjectSettlementSnapshot calculate(String projectId, BigDecimal settlementExpense, BigDecimal settlementTax) {
 		List<CustomerContractItem> contractItems = customerContractItemRepository.findByProjectIdOrderByWorkCategoryAsc(projectId);
 		BigDecimal initialContractAmount = contractItems.isEmpty()
 				? projectContractRepository.findByProjectId(projectId).stream()
@@ -164,7 +180,9 @@ public class ProjectSettlementService {
 						.reduce(BigDecimal.ZERO, BigDecimal::add);
 		BigDecimal finalBudgetAmount = initialBudgetAmount.add(changeBudgetAmount);
 
-		List<PurchaseOrder> purchaseOrders = purchaseOrderRepository.findByProjectId(projectId);
+		ProjectRevision revision = currentRevision(projectId);
+		List<PurchaseOrder> purchaseOrders = purchaseOrderRepository.findByProjectIdAndRevisionIdOrderByPoIdDesc(
+				projectId, revision == null ? null : revision.getRevisionId());
 		BigDecimal initialPoAmount = purchaseOrders.stream()
 				.map(PurchaseOrder::getInitialPoAmount)
 				.map(ProjectSettlementService::defaultZero)
@@ -193,7 +211,9 @@ public class ProjectSettlementService {
 						.map(ProjectSettlementService::defaultZero)
 						.reduce(BigDecimal.ZERO, BigDecimal::add);
 		BigDecimal unpaidBalance = finalPoAmount.subtract(actualPaidTotal).max(BigDecimal.ZERO);
-		BigDecimal finalCost = finalPoAmount.signum() > 0 ? finalPoAmount : actualPaidTotal;
+		BigDecimal finalCost = (finalPoAmount.signum() > 0 ? finalPoAmount : actualPaidTotal)
+				.add(defaultZero(settlementExpense))
+				.add(defaultZero(settlementTax));
 		BigDecimal finalProfit = finalContractAmount.subtract(finalCost);
 		BigDecimal profitMarginRate = finalContractAmount.signum() == 0
 				? BigDecimal.ZERO
@@ -212,20 +232,25 @@ public class ProjectSettlementService {
 				approvedClaimsTotal,
 				actualPaidTotal,
 				unpaidBalance,
+				defaultZero(settlementExpense),
+				defaultZero(settlementTax),
 				finalCost,
 				finalProfit,
 				profitMarginRate
 		);
 	}
 
-	private ProjectSettlementResponse toResponse(Project project, ProjectSettlementSnapshot snapshot, ProjectSettlement settlement, BigDecimal uncollectedReceivable) {
+	private ProjectSettlementResponse toResponse(Project project, ProjectRevision revision, ProjectSettlementSnapshot snapshot, ProjectSettlement settlement, BigDecimal uncollectedReceivable) {
 		return new ProjectSettlementResponse(
 				project.getProjectId(),
 				project.getProjectCode(),
 				project.getProjectName(),
+				revision == null ? null : revision.getRevisionNumber(),
 				new AmountSummary(snapshot.initialContractAmount(), snapshot.changeContractAmount(), snapshot.finalContractAmount()),
 				new AmountSummary(snapshot.initialBudgetAmount(), snapshot.changeBudgetAmount(), snapshot.finalBudgetAmount()),
 				new AmountSummary(snapshot.initialPoAmount(), snapshot.changePoAmount(), snapshot.finalPoAmount()),
+				snapshot.settlementExpense(),
+				snapshot.settlementTax(),
 				new PaymentSummary(snapshot.approvedClaimsTotal(), snapshot.actualPaidTotal(), snapshot.unpaidBalance(), defaultZero(uncollectedReceivable)),
 				new Profitability(snapshot.finalCost(), snapshot.finalProfit(), snapshot.profitMarginRate()),
 				settlement != null,
@@ -236,6 +261,10 @@ public class ProjectSettlementService {
 				settlement == null ? null : settlement.getSettledBy(),
 				settlement == null ? null : settlement.getSettledAt()
 		);
+	}
+
+	private ProjectRevision currentRevision(String projectId) {
+		return revisionRepository.findTopByProjectIdAndStatusOrderByRevisionNumberDesc(projectId, "APPROVED").orElse(null);
 	}
 
 	private Project getProject(String projectId) {

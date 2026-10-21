@@ -8,6 +8,7 @@ import java.util.List;
 public record PurchaseOrderResponse(
 		@JsonProperty("project_id") String projectId,
 		@JsonProperty("project_code") String projectCode,
+		@JsonProperty("revision_number") Integer revisionNumber,
 		List<Item> items
 ) {
 	public record Item(

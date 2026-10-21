@@ -36,6 +36,9 @@ public class ContractChange {
 	@Column(name = "approved_at")
 	private LocalDateTime approvedAt;
 
+	@Column(name = "approval_id", length = 64)
+	private String approvalId;
+
 	protected ContractChange() {
 	}
 
@@ -62,4 +65,8 @@ public class ContractChange {
 	public String getReason() { return reason; }
 	public ApprovalStatus getApprovalStatus() { return approvalStatus; }
 	public LocalDateTime getApprovedAt() { return approvedAt; }
+	public String getApprovalId() { return approvalId; }
+	public void linkApproval(String approvalId) { this.approvalId = approvalId; this.approvalStatus = ApprovalStatus.REQUESTED; }
+	public void approve() { this.approvalStatus = ApprovalStatus.APPROVED; this.approvedAt = LocalDateTime.now(); }
+	public void reject() { this.approvalStatus = ApprovalStatus.REJECTED; }
 }

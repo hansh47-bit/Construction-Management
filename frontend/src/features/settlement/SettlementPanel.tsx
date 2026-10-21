@@ -11,11 +11,18 @@ export function SettlementPanel({
   completeSettlement,
 }: {
   settlement: ProjectSettlement
-  form: { uncollected_receivable: string; settlement_notes: string; force_complete_if_unpaid: boolean; unpaid_handling_reason: string }
-  setForm: (value: { uncollected_receivable: string; settlement_notes: string; force_complete_if_unpaid: boolean; unpaid_handling_reason: string }) => void
+  form: { uncollected_receivable: string; settlement_expense: string; settlement_tax: string; settlement_notes: string; force_complete_if_unpaid: boolean; unpaid_handling_reason: string }
+  setForm: (value: { uncollected_receivable: string; settlement_expense: string; settlement_tax: string; settlement_notes: string; force_complete_if_unpaid: boolean; unpaid_handling_reason: string }) => void
   completeSettlement: () => void
 }) {
   const hasUnpaidBalance = settlement.payments.unpaid_balance > 0
+  const settlementExpense = toNumber(form.settlement_expense)
+  const settlementTax = toNumber(form.settlement_tax)
+  const previewFinalCost = settlement.is_settled
+    ? settlement.profitability.final_cost
+    : settlement.profitability.final_cost + settlementExpense + settlementTax
+  const previewFinalProfit = settlement.contract.final_amount - previewFinalCost
+  const previewProfitMarginRate = settlement.contract.final_amount === 0 ? 0 : (previewFinalProfit / settlement.contract.final_amount) * 100
   const sections = [
     ['계약 및 매출 현황', settlement.contract, '최종 계약금액'],
     ['실행예산 현황', settlement.execution_budget, '최종 실행예산'],
@@ -24,6 +31,11 @@ export function SettlementPanel({
 
   return (
     <div>
+      {settlement.revision_number && (
+        <div className="mb-4 rounded-md border border-cyan-200 bg-cyan-50 px-4 py-3 text-sm text-cyan-900">
+          <strong>{settlement.revision_number}차 준공정산</strong>입니다. 이전 차수의 발주·기성·지급 내역은 보존하되 현재 정산 금액에는 포함하지 않습니다.
+        </div>
+      )}
       <div className="flex flex-col gap-4 border-b border-slate-200 pb-4 lg:flex-row lg:items-center lg:justify-between">
         <div>
           <h3 className="text-lg font-semibold text-slate-950">준공정산</h3>
@@ -74,7 +86,19 @@ export function SettlementPanel({
             </div>
             <div>
               <dt className="mb-2 text-slate-500">미수금</dt>
-              <dd><MoneyInput value={toNumber(form.uncollected_receivable)} onChange={(value) => setForm({ ...form, uncollected_receivable: value })} /></dd>
+              <dd><MoneyInput value={toNumber(form.uncollected_receivable)} onChange={(value) => setForm({ ...form, uncollected_receivable: value })} disabled={settlement.is_settled} /></dd>
+            </div>
+            <div className="grid gap-3 border-t border-slate-100 pt-4 sm:grid-cols-2">
+              <label className="block text-sm font-semibold text-slate-700">
+                준공 경비
+                <span className="mt-1 block text-xs font-normal text-slate-500">현장 경비, 운반비 등 발주 외 추가 비용</span>
+                <MoneyInput value={settlementExpense} onChange={(value) => setForm({ ...form, settlement_expense: value })} disabled={settlement.is_settled} className="mt-2" />
+              </label>
+              <label className="block text-sm font-semibold text-slate-700">
+                준공 세금
+                <span className="mt-1 block text-xs font-normal text-slate-500">정산 시 비용 처리할 세금</span>
+                <MoneyInput value={settlementTax} onChange={(value) => setForm({ ...form, settlement_tax: value })} disabled={settlement.is_settled} className="mt-2" />
+              </label>
             </div>
           </dl>
         </article>
@@ -84,17 +108,17 @@ export function SettlementPanel({
           <div className="mt-4 grid gap-3 sm:grid-cols-3">
             <div className="border-l-2 border-slate-200 pl-3">
               <p className="text-xs font-semibold text-slate-500">최종 원가</p>
-              <p className="mt-2 text-lg font-semibold text-slate-950">{formatWon(settlement.profitability.final_cost)}</p>
+              <p className="mt-2 text-lg font-semibold text-slate-950">{formatWon(previewFinalCost)}</p>
               <p className="mt-1 text-xs text-slate-500">최종 발주금액 기준</p>
             </div>
             <div className="border-l-2 border-slate-200 pl-3">
               <p className="text-xs font-semibold text-slate-500">최종 이익</p>
-              <p className={`mt-2 text-lg font-semibold ${settlement.profitability.final_profit < 0 ? 'text-rose-700' : 'text-cyan-700'}`}>{formatWon(settlement.profitability.final_profit)}</p>
+              <p className={`mt-2 text-lg font-semibold ${previewFinalProfit < 0 ? 'text-rose-700' : 'text-cyan-700'}`}>{formatWon(previewFinalProfit)}</p>
               <p className="mt-1 text-xs text-slate-500">최종 계약금액 - 최종 원가</p>
             </div>
             <div className="border-l-2 border-slate-200 pl-3">
               <p className="text-xs font-semibold text-slate-500">최종 이익률</p>
-              <p className="mt-2 text-lg font-semibold text-slate-950">{settlement.profitability.profit_margin_rate.toFixed(2)}%</p>
+              <p className="mt-2 text-lg font-semibold text-slate-950">{previewProfitMarginRate.toFixed(2)}%</p>
               <p className="mt-1 text-xs text-slate-500">최종 이익 / 최종 계약금액</p>
             </div>
           </div>

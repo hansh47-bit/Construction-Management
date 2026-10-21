@@ -4,6 +4,7 @@ import com.construction.management.project.api.ExecutionBudgetDetailRequest;
 import com.construction.management.project.api.ExecutionBudgetDetailResponse;
 import com.construction.management.project.api.ExecutionBudgetDetailResponse.Detail;
 import com.construction.management.project.api.ExecutionBudgetDetailResponse.SummaryItem;
+import com.construction.management.project.api.ProjectRevisionBudgetView;
 import com.construction.management.project.domain.ApprovalStatus;
 import com.construction.management.project.domain.BudgetChange;
 import com.construction.management.project.domain.ContractChange;
@@ -43,6 +44,7 @@ public class ExecutionBudgetDetailService {
 	private final BudgetChangeRepository budgetChangeRepository;
 	private final ContractChangeRepository contractChangeRepository;
 	private final PoRequisitionRepository poRequisitionRepository;
+	private final ProjectRevisionService projectRevisionService;
 
 	public ExecutionBudgetDetailService(
 			ProjectRepository projectRepository,
@@ -52,7 +54,8 @@ public class ExecutionBudgetDetailService {
 			ProjectSettlementService projectSettlementService,
 			BudgetChangeRepository budgetChangeRepository,
 			ContractChangeRepository contractChangeRepository,
-			PoRequisitionRepository poRequisitionRepository
+			PoRequisitionRepository poRequisitionRepository,
+			ProjectRevisionService projectRevisionService
 	) {
 		this.projectRepository = projectRepository;
 		this.customerContractItemRepository = customerContractItemRepository;
@@ -62,12 +65,13 @@ public class ExecutionBudgetDetailService {
 		this.budgetChangeRepository = budgetChangeRepository;
 		this.contractChangeRepository = contractChangeRepository;
 		this.poRequisitionRepository = poRequisitionRepository;
+		this.projectRevisionService = projectRevisionService;
 	}
 
 	@Transactional(readOnly = true)
 	public ExecutionBudgetDetailResponse getDetails(String projectId) {
 		Project project = getProject(projectId);
-		return toResponse(project);
+		return toResponse(project, projectRevisionService.latestApprovedBudget(projectId).orElse(null));
 	}
 
 	@Transactional
@@ -101,7 +105,7 @@ public class ExecutionBudgetDetailService {
 		detailRepository.saveAll(details);
 		rollup(projectId, details);
 
-		return toResponse(project);
+		return toResponse(project, null);
 	}
 
 	private void rollup(String projectId, List<ProjectExecutionBudgetDetail> details) {
@@ -142,8 +146,12 @@ public class ExecutionBudgetDetailService {
 				});
 	}
 
-	private ExecutionBudgetDetailResponse toResponse(Project project) {
-		List<ProjectExecutionBudgetDetail> details = detailRepository.findByProjectIdOrderByBudgetItemIdAscDetailIdAsc(project.getProjectId());
+	private ExecutionBudgetDetailResponse toResponse(Project project, ProjectRevisionBudgetView appliedRevision) {
+		List<Detail> details = appliedRevision == null
+				? detailRepository.findByProjectIdOrderByBudgetItemIdAscDetailIdAsc(project.getProjectId()).stream()
+						.map(detail -> new Detail(detail.getDetailId(), detail.getBudgetItemId(), detail.getCategoryName(), detail.getItemName(), detail.getCostType(), detail.getVendorDescription(), detail.getUnit(), detail.getQuantity(), detail.getUnitPrice(), detail.getAmount(), detail.getEvidenceLink(), detail.getNote()))
+						.toList()
+				: appliedRevision.details();
 		List<ProjectExecutionBudgetItem> items = itemRepository.findByProjectIdOrderByItemIdAsc(project.getProjectId());
 		String approvalStatus = executionBudgetApprovalStatus(items);
 		String approvalId = items.stream().map(ProjectExecutionBudgetItem::getApprovalId).filter(StringUtils::hasText).findFirst().orElse(null);
@@ -158,7 +166,7 @@ public class ExecutionBudgetDetailService {
 				.map(item -> defaultZero(item.getApprovedBudgetAmount()).add(changesByItem.getOrDefault(item.getItemId(), BigDecimal.ZERO)))
 				.reduce(BigDecimal.ZERO, BigDecimal::add);
 		BigDecimal totalDetailAmount = details.stream()
-				.map(ProjectExecutionBudgetDetail::getAmount)
+				.map(Detail::amount)
 				.map(ExecutionBudgetDetailService::defaultZero)
 				.reduce(BigDecimal.ZERO, BigDecimal::add);
 		BigDecimal contractSupplyAmount = customerContractItemRepository.findByProjectIdOrderByWorkCategoryAsc(project.getProjectId()).stream()
@@ -177,34 +185,21 @@ public class ExecutionBudgetDetailService {
 				project.getProjectName(),
 				contractSupplyAmount,
 				targetCostLimit,
-				approvalStatus,
-				approvalId,
-				approvalComment,
-				approvedAmount,
+			approvalStatus,
+			approvalId,
+			approvalComment,
+			appliedRevision == null ? null : appliedRevision.revisionNumber(),
+			approvedAmount,
 				totalDetailAmount,
 				targetCostLimit.compareTo(BigDecimal.ZERO) > 0 && totalDetailAmount.compareTo(targetCostLimit) > 0,
 				items.stream()
 						.sorted(Comparator.comparing(ProjectExecutionBudgetItem::getItemId))
-				.map(item -> new SummaryItem(ProjectExecutionBudgetItem.budgetItemId(project.getProjectId(), item.getItemId()), item.getCategoryName(), item.getItemName(), item.getApprovalStatus(),
+						.filter(item -> appliedRevision == null || details.stream().anyMatch(detail -> detail.budgetItemId().equals(ProjectExecutionBudgetItem.budgetItemId(project.getProjectId(), item.getItemId()))))
+						.map(item -> new SummaryItem(ProjectExecutionBudgetItem.budgetItemId(project.getProjectId(), item.getItemId()), item.getCategoryName(), item.getItemName(), item.getApprovalStatus(),
 						purchaseOrderStatusByItem.getOrDefault(ProjectExecutionBudgetItem.budgetItemId(project.getProjectId(), item.getItemId()), "NOT_REQUESTED"),
 						item.isApproved() ? defaultZero(item.getApprovedBudgetAmount()).add(changesByItem.getOrDefault(item.getItemId(), BigDecimal.ZERO)) : item.getBudgetAmount()))
 						.toList(),
-				details.stream()
-						.map(detail -> new Detail(
-								detail.getDetailId(),
-								detail.getBudgetItemId(),
-								detail.getCategoryName(),
-								detail.getItemName(),
-								detail.getCostType(),
-								detail.getVendorDescription(),
-								detail.getUnit(),
-								detail.getQuantity(),
-								detail.getUnitPrice(),
-								detail.getAmount(),
-								detail.getEvidenceLink(),
-								detail.getNote()
-						))
-						.toList()
+			details
 		);
 	}
 

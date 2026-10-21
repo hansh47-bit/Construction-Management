@@ -23,6 +23,7 @@ const vatTypes = ['별도', '포함', '면세']
 
 export function VendorComparisonPanel({
   executionBudget,
+  revisionProcurementItemIds,
   selectedExecutionItemId,
   setSelectedExecutionItemId,
   vendorComparison,
@@ -37,6 +38,7 @@ export function VendorComparisonPanel({
   openPurchaseOrderHistory,
 }: {
   executionBudget: ExecutionBudgetDetailResponse
+  revisionProcurementItemIds: string[] | null
   selectedExecutionItemId: string
   setSelectedExecutionItemId: (value: string) => void
   vendorComparison: VendorComparisonResponse
@@ -50,7 +52,7 @@ export function VendorComparisonPanel({
   uploadVendorComparisonFile: (index: number, file: File) => void
   openPurchaseOrderHistory: () => void
 }) {
-	const approvedItems = executionBudget.summary_by_item.filter((item) => item.approval_status === 'APPROVED')
+	const approvedItems = executionBudget.summary_by_item.filter((item) => item.approval_status === 'APPROVED' && (revisionProcurementItemIds === null || revisionProcurementItemIds.includes(item.budget_item_id)))
   const hasApprovedItems = approvedItems.length > 0
   const selected = comparisons.find((comparison) => comparison.is_selected)
   const selectedExecutionItem = approvedItems.find((item) => item.budget_item_id === selectedExecutionItemId)
@@ -64,7 +66,7 @@ export function VendorComparisonPanel({
       <div className="flex flex-col gap-4 border-b border-slate-200 pb-4 lg:flex-row lg:items-center lg:justify-between">
         <div>
           <h3 className="text-lg font-semibold text-slate-950">업체 비교견적 및 발주품의</h3>
-          <p className="mt-1 text-sm text-slate-500">승인 실행예산을 기준으로 업체 견적을 비교하고 선정 업체를 발주품의로 연결합니다.</p>
+          <p className="mt-1 text-sm text-slate-500">승인 실행예산을 기준으로 업체 견적을 비교하고 선정 업체를 발주품의로 연결합니다. 새 차수가 승인된 경우 해당 차수의 전체 실행예산 항목을 기준으로 진행합니다.</p>
         </div>
         <div className="flex flex-wrap gap-2">
           <button type="button" onClick={saveVendorComparisons} disabled={!hasApprovedItems || isPurchaseOrderLocked} className="inline-flex items-center gap-2 rounded-md bg-slate-900 px-4 py-2 text-sm font-semibold text-white hover:bg-slate-800 disabled:cursor-not-allowed disabled:bg-slate-300">
@@ -78,7 +80,7 @@ export function VendorComparisonPanel({
       </div>
 
 		{!hasApprovedItems && (
-			<p className="border-b border-slate-200 py-5 text-sm text-slate-500">승인된 세부실행예산 항목이 있어야 업체 비교견적을 작성할 수 있습니다.</p>
+			<p className="border-b border-slate-200 py-5 text-sm text-slate-500">{revisionProcurementItemIds !== null ? '승인된 차수의 실행예산 항목이 없습니다. 기존 발주를 수정해야 하면 별도 발주변경 결재로 처리합니다.' : '승인된 세부실행예산 항목이 있어야 업체 비교견적을 작성할 수 있습니다.'}</p>
 		)}
       <div className="grid gap-4 border-b border-slate-200 py-5 lg:grid-cols-[260px_1fr_1fr_1fr]">
         <label className="block text-sm font-semibold text-slate-700">

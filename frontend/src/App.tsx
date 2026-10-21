@@ -1,57 +1,35 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import type { FormEvent } from 'react'
-import type { ApprovalItem, ChangeOrder, CustomerContract, CustomerContractItem, ExecutionBudgetDetail, ExecutionBudgetDetailResponse, ExecutionBudgetSummaryItem, IntegratedSummary, ProgressPaymentResponse, Project, ProjectForm, ProjectSettlement, PurchaseOrderDraft, PurchaseOrderHistoryItem, PurchaseOrderHistoryResponse, VendorComparisonItem, VendorComparisonResponse } from './types/domain'
+import type { ApprovalItem, CustomerContract, CustomerContractItem, ExecutionBudgetDetail, ExecutionBudgetDetailResponse, ExecutionBudgetSummaryItem, IntegratedSummary, ProgressPaymentResponse, ProjectSettlement, PurchaseOrderDraft, PurchaseOrderHistoryItem, PurchaseOrderHistoryResponse, VendorComparisonItem, VendorComparisonResponse } from './types/domain'
 import { approvalApi } from './features/approvals/api'
-import { getChangeOrders } from './features/changes/api'
 import { contractApi } from './features/contracts/api'
 import { executionBudgetApi } from './features/execution-budget/api'
 import { paymentApi } from './features/payments/api'
 import { procurementApi } from './features/procurement/api'
 import { projectApi } from './features/projects/api'
 import { settlementApi } from './features/settlement/api'
-import { SubMetric } from './components/ui/Metrics'
 import { ProjectCreationModal } from './features/projects/ProjectCreationModal'
 import { ProjectList } from './features/projects/ProjectList'
+import { useProjects } from './features/projects/useProjects'
 import { ApprovalInboxPanel } from './features/approvals/ApprovalInboxPanel'
-import { ChangeHistoryPanel } from './features/changes/ChangeHistoryPanel'
+import { RevisionManagementPanel } from './features/changes/RevisionManagementPanel'
+import { revisionApi } from './features/changes/revision-api'
 import { CostBreakdownTable } from './features/dashboard/CostBreakdownTable'
+import { ProjectOverview } from './features/dashboard/ProjectOverview'
+import { ExecutiveDashboard } from './features/dashboard/ExecutiveDashboard'
 import { ContractManagementPanel } from './features/contracts/ContractManagementPanel'
 import { ExecutionBudgetDetailPanel } from './features/execution-budget/ExecutionBudgetDetailPanel'
 import { ProgressPaymentPanel } from './features/payments/ProgressPaymentPanel'
 import { PurchaseOrderHistoryPanel } from './features/procurement/PurchaseOrderHistoryPanel'
 import { VendorComparisonPanel } from './features/procurement/VendorComparisonPanel'
 import { SettlementPanel } from './features/settlement/SettlementPanel'
-import { formatWon, toNumber } from './lib/format'
+import { toNumber } from './lib/format'
 import {
   AlertTriangle,
-  ArrowLeft,
-  ArrowRight,
-  Banknote,
-  BriefcaseBusiness,
-  CheckCircle2,
-  ClipboardList,
-  FileClock,
   FolderPlus,
-  MapPin,
 } from 'lucide-react'
 
 const tabs = ['고객 견적·계약 관리', '세부실행예산', '업체 비교견적', '통합결재함', '공종별 흐름 추적', '계약/발주 이력', '기성 및 지급 현황', '준공정산', '증빙 및 파일']
 const projectTabs = tabs.filter((tab) => tab !== '통합결재함')
-
-const initialForm: ProjectForm = {
-  project_name: '',
-  client_name: '',
-  site_address: '',
-  contract_date: '',
-  start_date: '',
-  end_date: '',
-  team_leader_id: '',
-  manager_id: '',
-  target_profit_rate: '0',
-  note: '',
-}
-
-
 
 function newContractItem(): CustomerContractItem {
   return {
@@ -96,9 +74,7 @@ function newVendorComparison(itemId = 'EX-001', suffix = 'A'): VendorComparisonI
 }
 
 function App() {
-  const [activePage, setActivePage] = useState<'projects' | 'approvals' | 'changes'>('projects')
-  const [projects, setProjects] = useState<Project[]>([])
-  const [keyword, setKeyword] = useState('')
+  const [activePage, setActivePage] = useState<'projects' | 'executive' | 'approvals' | 'changes'>('projects')
   const [selectedProjectId, setSelectedProjectId] = useState<string | null>(null)
   const [summary, setSummary] = useState<IntegratedSummary | null>(null)
   const [contract, setContract] = useState<CustomerContract | null>(null)
@@ -107,11 +83,12 @@ function App() {
   const [executionDetails, setExecutionDetails] = useState<ExecutionBudgetDetail[]>([])
   const [executionBudgetApprovalFiles, setExecutionBudgetApprovalFiles] = useState<File[]>([])
   const [selectedExecutionItemId, setSelectedExecutionItemId] = useState('EX-001')
+  const [revisionProcurementItemIds, setRevisionProcurementItemIds] = useState<string[] | null>(null)
   const [vendorComparison, setVendorComparison] = useState<VendorComparisonResponse | null>(null)
   const [vendorComparisons, setVendorComparisons] = useState<VendorComparisonItem[]>([])
   const [purchaseOrderDraft, setPurchaseOrderDraft] = useState<PurchaseOrderDraft | null>(null)
   const [purchaseOrderHistory, setPurchaseOrderHistory] = useState<PurchaseOrderHistoryItem[]>([])
-  const [changeOrders, setChangeOrders] = useState<ChangeOrder[]>([])
+  const [purchaseOrderHistoryRevision, setPurchaseOrderHistoryRevision] = useState<number | undefined>()
   const [approvals, setApprovals] = useState<ApprovalItem[]>([])
   const [selectedApproval, setSelectedApproval] = useState<ApprovalItem | null>(null)
   const [approvalStatusFilter, setApprovalStatusFilter] = useState('REQUESTED')
@@ -122,24 +99,17 @@ function App() {
   const [selectedPoId, setSelectedPoId] = useState('')
   const [claimForm, setClaimForm] = useState({ degree: '1', claim_amount: '0' })
   const [selectedPaymentPoIds, setSelectedPaymentPoIds] = useState<string[]>([])
-  const [settlementForm, setSettlementForm] = useState({ uncollected_receivable: '0', settlement_notes: '', force_complete_if_unpaid: false, unpaid_handling_reason: '' })
+  const [settlementForm, setSettlementForm] = useState({ uncollected_receivable: '0', settlement_expense: '0', settlement_tax: '0', settlement_notes: '', force_complete_if_unpaid: false, unpaid_handling_reason: '' })
   const [targetProfitRate, setTargetProfitRate] = useState('0')
   const [selectedFileType, setSelectedFileType] = useState('CONTRACT')
-  const [isModalOpen, setIsModalOpen] = useState(false)
-  const [form, setForm] = useState<ProjectForm>(initialForm)
   const [activeTab, setActiveTab] = useState(tabs[0])
   const [error, setError] = useState<string | null>(null)
   const [isLoading, setIsLoading] = useState(false)
   const tabRef = useRef<HTMLDivElement | null>(null)
-
-  useEffect(() => {
-    loadProjects()
-  }, [])
-
-  useEffect(() => {
-    const handle = window.setTimeout(() => loadProjects(keyword), 200)
-    return () => window.clearTimeout(handle)
-  }, [keyword])
+  const { projects, keyword, setKeyword, isModalOpen, setIsModalOpen, form, setForm, refreshProjects, submitProject, deleteProject } = useProjects({
+    onError: setError,
+    onDeleted: (projectId) => { if (selectedProjectId === projectId) setSelectedProjectId(null) },
+  })
 
   useEffect(() => {
     if (!selectedProjectId) {
@@ -149,11 +119,12 @@ function App() {
       setExecutionBudget(null)
       setExecutionDetails([])
       setExecutionBudgetApprovalFiles([])
+      setRevisionProcurementItemIds(null)
       setVendorComparison(null)
       setVendorComparisons([])
       setPurchaseOrderDraft(null)
       setPurchaseOrderHistory([])
-      setChangeOrders([])
+      setPurchaseOrderHistoryRevision(undefined)
       setApprovals([])
       setSelectedApproval(null)
       setProgressPayment(null)
@@ -203,7 +174,6 @@ function App() {
     loadApprovals()
     loadProgressPayments(selectedProjectId)
     loadPurchaseOrders(selectedProjectId)
-    loadChangeOrders(selectedProjectId)
     loadSettlement(selectedProjectId)
   }, [selectedProjectId])
 
@@ -219,65 +189,6 @@ function App() {
     [projects, selectedProjectId, summary],
   )
 
-  async function loadProjects(search = '') {
-    try {
-      const response = await projectApi.list(search)
-      if (!response.ok) {
-        throw new Error(`프로젝트 목록 조회 실패: ${response.status}`)
-      }
-      const data: Project[] = await response.json()
-      setProjects(data)
-      setError(null)
-    } catch (err) {
-      setError(err instanceof Error ? err.message : '프로젝트 목록을 불러오지 못했습니다.')
-      setIsLoading(false)
-    }
-  }
-
-  async function submitProject(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault()
-    const payload = {
-      ...form,
-      target_profit_rate: Number(form.target_profit_rate || 0),
-    }
-
-    const response = await projectApi.create(payload)
-
-    if (!response.ok) {
-      setError(`프로젝트 등록 실패: ${response.status}`)
-      return
-    }
-
-    await response.json()
-    setForm(initialForm)
-    setIsModalOpen(false)
-    await loadProjects()
-    setSelectedProjectId(null)
-  }
-
-  async function deleteProject(project: Project) {
-    const confirmed = window.confirm(
-      `“${project.project_name}” 프로젝트와 연결된 계약·예산·발주·기성·지급·결재·변경 데이터를 모두 영구 삭제할까요?\n정산완료 프로젝트만 삭제할 수 없습니다.`,
-    )
-    if (!confirmed) {
-      return
-    }
-
-    const response = await projectApi.remove(project.project_id)
-
-    if (!response.ok) {
-      const body = await response.json().catch(() => null) as { detail?: string; message?: string } | null
-      setError(body?.detail ?? body?.message ?? `프로젝트 삭제 실패: ${response.status}`)
-      return
-    }
-
-    setError(null)
-    if (selectedProjectId === project.project_id) {
-      setSelectedProjectId(null)
-    }
-    await loadProjects(keyword)
-  }
-
   async function startConstruction() {
     if (!selectedProjectId || !selectedProject) return
     if (!window.confirm(`“${selectedProject.project_name}” 프로젝트의 공사를 시작하시겠습니까? 상태가 공사진행으로 변경됩니다.`)) {
@@ -292,7 +203,7 @@ function App() {
     }
 
     await response.json()
-    await loadProjects(keyword)
+    await refreshProjects(keyword)
     const summaryResponse = await projectApi.integratedSummary(selectedProjectId)
     if (summaryResponse.ok) setSummary(await summaryResponse.json())
     setError(null)
@@ -312,7 +223,7 @@ function App() {
     }
 
     await response.json()
-    await loadProjects(keyword)
+    await refreshProjects(keyword)
     const summaryResponse = await projectApi.integratedSummary(selectedProjectId)
     if (summaryResponse.ok) setSummary(await summaryResponse.json())
     setError(null)
@@ -362,7 +273,7 @@ function App() {
     setContract(data)
     setContractItems(data.items.length > 0 ? data.items : [newContractItem()])
     setTargetProfitRate(String(data.target_profit_rate ?? 0))
-    await loadProjects(keyword)
+    await refreshProjects(keyword)
     if (selectedProjectId) {
       const summaryResponse = await projectApi.integratedSummary(selectedProjectId)
       if (summaryResponse.ok) {
@@ -411,15 +322,22 @@ function App() {
 
   async function loadExecutionBudgetDetails(projectId: string) {
     try {
-      const response = await executionBudgetApi.get(projectId)
+      const [response, procurementResponse] = await Promise.all([executionBudgetApi.get(projectId), revisionApi.procurementItems(projectId)])
       if (!response.ok) {
         throw new Error(`세부실행예산 조회 실패: ${response.status}`)
       }
       const data: ExecutionBudgetDetailResponse = await response.json()
+      let eligibleItemIds: string[] | null = null
+      if (procurementResponse.ok) {
+        const procurement: { has_approved_revision: boolean; item_ids: string[] } = await procurementResponse.json()
+        eligibleItemIds = procurement.has_approved_revision ? procurement.item_ids : null
+        setRevisionProcurementItemIds(eligibleItemIds)
+      }
       setExecutionBudget(data)
       setExecutionDetails(data.details.length > 0 ? data.details : [newExecutionBudgetDetail(data.project_code)])
-      if (data.summary_by_item.length > 0) {
-        setSelectedExecutionItemId((current) => current || data.summary_by_item[0].budget_item_id)
+      const eligibleItems = data.summary_by_item.filter((item) => item.approval_status === 'APPROVED' && (eligibleItemIds === null || eligibleItemIds.includes(item.budget_item_id)))
+      if (eligibleItems.length > 0) {
+        setSelectedExecutionItemId((current) => eligibleItems.some((item) => item.budget_item_id === current) ? current : eligibleItems[0].budget_item_id)
       }
       setError(null)
     } catch (err) {
@@ -458,53 +376,6 @@ function App() {
     setExecutionBudget(data)
     setExecutionDetails(data.details.length > 0 ? data.details : [newExecutionBudgetDetail(data.project_code)])
     await loadSettlement(selectedProjectId)
-  }
-
-  async function correctAmountByExecutive() {
-    if (!selectedProjectId || !contract) return
-    const targetText = window.prompt('변경할 계약 공급가액을 입력하세요. 변경 금액은 즉시 반영되며 원본은 유지됩니다.', String(contract.current_contract_supply_amount ?? contract.total_contract_supply_amount))
-    if (targetText === null) return
-    const targetAmount = Number(targetText.replaceAll(',', '').trim())
-    if (!Number.isFinite(targetAmount) || targetAmount < 0) {
-      setError('계약 공급가액을 0 이상의 숫자로 입력하세요.')
-      return
-    }
-    const reason = window.prompt('변경 사유를 입력하세요.')
-    if (!reason?.trim()) return
-    const response = await contractApi.executiveCorrection(selectedProjectId, {
-      target_contract_supply_amount: targetAmount,
-      reason: reason.trim(),
-      apply_execution_budget: true,
-      apply_purchase_orders: true,
-    })
-    if (!response.ok) {
-      const message = await response.text()
-      setError(message || `대표 금액 정정 실패: ${response.status}`)
-      return
-    }
-    const changeOrder: ChangeOrder = await response.json()
-    if (changeOrder.requires_reconciliation) {
-      await loadChangeOrders(selectedProjectId)
-      setError(`계약 변경안은 저장됐지만 ${changeOrder.reconciliation_message ?? '기성·지급 이력과 충돌해 조정이 필요합니다.'}`)
-      return
-    }
-    await Promise.all([
-      loadCustomerContract(selectedProjectId),
-      loadExecutionBudgetDetails(selectedProjectId),
-      loadPurchaseOrders(selectedProjectId),
-      loadChangeOrders(selectedProjectId),
-      loadProgressPayments(selectedProjectId),
-      loadSettlement(selectedProjectId),
-      loadProjects(keyword),
-    ])
-    const summaryResponse = await projectApi.integratedSummary(selectedProjectId)
-    if (summaryResponse.ok) setSummary(await summaryResponse.json())
-    setError(null)
-  }
-
-  async function loadChangeOrders(projectId: string) {
-    const response = await getChangeOrders(projectId)
-    if (response.ok) setChangeOrders(await response.json())
   }
 
   async function requestExecutionBudgetApproval() {
@@ -563,7 +434,7 @@ function App() {
     const decidedApproval: ApprovalItem = await response.json()
     setSelectedApproval(decidedApproval)
     await loadApprovals()
-    await loadProjects(keyword)
+    await refreshProjects(keyword)
     if (selectedProjectId) {
       await loadExecutionBudgetDetails(selectedProjectId)
       if (selectedExecutionItemId) await loadVendorComparisons(selectedProjectId, selectedExecutionItemId)
@@ -649,6 +520,7 @@ function App() {
     }
     const data: PurchaseOrderHistoryResponse = await response.json()
     setPurchaseOrderHistory(data.items)
+    setPurchaseOrderHistoryRevision(data.revision_number)
   }
 
   async function persistVendorComparisons(): Promise<VendorComparisonResponse | null> {
@@ -780,6 +652,8 @@ function App() {
       setSettlementForm((form) => ({
         ...form,
         uncollected_receivable: String(data.payments.uncollected_receivable ?? 0),
+        settlement_expense: String(data.settlement_expense ?? 0),
+        settlement_tax: String(data.settlement_tax ?? 0),
         settlement_notes: data.settlement_notes ?? form.settlement_notes,
         unpaid_handling_reason: data.unpaid_handling_reason ?? form.unpaid_handling_reason,
       }))
@@ -793,6 +667,8 @@ function App() {
     if (!selectedProjectId) return
     const response = await settlementApi.complete(selectedProjectId, {
       uncollected_receivable: toNumber(settlementForm.uncollected_receivable),
+      settlement_expense: toNumber(settlementForm.settlement_expense),
+      settlement_tax: toNumber(settlementForm.settlement_tax),
       settlement_notes: settlementForm.settlement_notes,
       force_complete_if_unpaid: settlementForm.force_complete_if_unpaid,
       unpaid_handling_reason: settlementForm.unpaid_handling_reason,
@@ -804,7 +680,7 @@ function App() {
       return
     }
     setSettlement(await response.json())
-    await loadProjects(keyword)
+    await refreshProjects(keyword)
     const summaryResponse = await projectApi.integratedSummary(selectedProjectId)
     if (summaryResponse.ok) {
       setSummary(await summaryResponse.json())
@@ -869,16 +745,6 @@ function App() {
     window.setTimeout(() => tabRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' }), 0)
   }
 
-  const flowCards = summary
-    ? [
-        ['현재 계약금액', summary.flow_summary.current_contract_amount, '계약/발주 이력'],
-        ['현재 실행예산', summary.flow_summary.current_execution_budget, '공종별 흐름 추적'],
-        ['현재 발주금액', summary.flow_summary.current_purchase_amount, '계약/발주 이력'],
-        ['누적 기성금액', summary.flow_summary.accumulated_completed_amount, '기성 및 지급 현황'],
-        ['실제 지급금액', summary.flow_summary.actual_paid_amount, '기성 및 지급 현황'],
-      ]
-    : []
-
   const contractTotal = useMemo(() => {
     const supply = contractItems.reduce((sum, item) => sum + (item.contract_amount || 0), 0)
     const vat = contractItems.reduce((sum, item) => sum + (item.vat_amount || 0), 0)
@@ -922,16 +788,25 @@ function App() {
           <div>
             <p className="text-sm font-semibold text-slate-500">Project Single View</p>
             <h1 className="mt-2 text-3xl font-semibold tracking-normal text-slate-950">
-              {activePage === 'projects' ? '프로젝트 등록 및 통합현황' : activePage === 'approvals' ? '통합결재함' : '변경관리 이력'}
+              {activePage === 'projects' ? '프로젝트 등록 및 통합현황' : activePage === 'executive' ? '경영진 대시보드' : activePage === 'approvals' ? '통합결재함' : '변경관리 이력'}
             </h1>
             <p className="mt-2 max-w-3xl text-sm leading-6 text-slate-600">
               {activePage === 'projects'
                 ? '프로젝트를 선택하면 계약, 실행예산, 발주, 기성, 지급, 예상손익을 하나의 흐름으로 추적합니다.'
-                : activePage === 'approvals'
+                : activePage === 'executive'
+                  ? '프로젝트별 현재 계약·예산·발주·기성·지급과 대표 결재 대기 현황을 집계합니다.'
+                  : activePage === 'approvals'
                   ? '모든 프로젝트의 실행예산 및 발주품의 결재를 한 곳에서 처리합니다.'
                   : '선택한 프로젝트의 금액 변경 이력과 연결 영향을 확인합니다.'}
             </p>
             <div className="mt-4 flex flex-wrap gap-2">
+              <button
+                type="button"
+                onClick={() => setActivePage('executive')}
+                className={`rounded-md px-3 py-2 text-sm font-semibold ${activePage === 'executive' ? 'bg-slate-900 text-white' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'}`}
+              >
+                경영진 대시보드
+              </button>
               <button
                 type="button"
                 onClick={() => setActivePage('projects')}
@@ -987,62 +862,7 @@ function App() {
             }}
             onDelete={deleteProject}
           />
-        ) : (
-          <section className="rounded-md border border-slate-200 bg-white p-4 shadow-sm">
-            <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
-              <div>
-                <button
-                  type="button"
-                  onClick={() => setSelectedProjectId(null)}
-                  className="mb-3 inline-flex items-center gap-2 rounded-md border border-slate-300 px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50"
-                >
-                  <ArrowLeft className="h-4 w-4" aria-hidden="true" />
-                  목록
-                </button>
-                <div className="flex flex-wrap items-center gap-2">
-                  <h2 className="text-xl font-semibold text-slate-950">
-                    {selectedProject?.project_name ?? '프로젝트'}
-                  </h2>
-                  {selectedProject?.status && (
-                    <span className="rounded-full bg-cyan-100 px-2.5 py-1 text-xs font-semibold text-cyan-800">
-                      {selectedProject.status}
-                    </span>
-                  )}
-                  {selectedProject?.status === '공사준비' && (
-                    <button
-                      type="button"
-                      onClick={startConstruction}
-                      className="rounded-md bg-cyan-700 px-3 py-1.5 text-xs font-semibold text-white hover:bg-cyan-800"
-                    >
-                      공사 시작
-                    </button>
-                  )}
-                  {selectedProject?.status === '계약' && executionBudget?.approval_status === 'APPROVED' && (
-                    <button
-                      type="button"
-                      onClick={synchronizePreparationStatus}
-                      className="rounded-md border border-cyan-700 px-3 py-1.5 text-xs font-semibold text-cyan-800 hover:bg-cyan-50"
-                    >
-                      실행예산 승인 반영
-                    </button>
-                  )}
-                </div>
-                <p className="mt-2 text-sm text-slate-600">
-                  {selectedProject?.project_code} · {selectedProject?.client_name ?? '발주처 미입력'}
-                </p>
-                <p className="mt-4 flex items-center gap-2 text-sm text-slate-600">
-                  <MapPin className="h-4 w-4 text-slate-400" aria-hidden="true" />
-                  {selectedProject?.site_address ?? '현장주소 미입력'}
-                </p>
-              </div>
-              <div className="rounded-md border border-slate-200 bg-slate-50 p-4 text-sm text-slate-600 lg:text-right">
-                <p className="font-medium text-slate-800">목표 이익률 {selectedProject?.target_profit_rate ?? 0}%</p>
-                <p className="mt-1">담당자 {selectedProject?.manager_id ?? '미지정'}</p>
-                <p className="mt-1">팀장 {selectedProject?.team_leader_id ?? '미지정'}</p>
-              </div>
-            </div>
-          </section>
-        )}
+        ) : null}
 
         {isLoading && !summary ? (
           <section className="rounded-md border border-slate-200 bg-white p-8 text-center text-sm text-slate-500">
@@ -1050,39 +870,15 @@ function App() {
           </section>
         ) : summary ? (
           <>
-            <section className="rounded-md border border-slate-200 bg-white p-4 shadow-sm">
-              <div className="grid gap-3 xl:grid-cols-5">
-                {flowCards.map(([label, value, targetTab], index) => (
-                  <button
-                    key={label}
-                    type="button"
-                    onClick={() => moveToTab(targetTab as string)}
-                    className="group rounded-md border border-slate-200 bg-white p-4 text-left shadow-sm transition hover:border-cyan-300 hover:bg-cyan-50"
-                  >
-                    <div className="flex items-center justify-between gap-2">
-                      <p className="text-sm font-medium text-slate-500">{label}</p>
-                      {index < flowCards.length - 1 && <ArrowRight className="h-4 w-4 text-slate-300 group-hover:text-cyan-700" aria-hidden="true" />}
-                    </div>
-                    <p className="mt-3 text-xl font-semibold text-slate-950">{formatWon(value as number)}</p>
-                  </button>
-                ))}
-              </div>
-            </section>
-
-            <section className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
-              <SubMetric label="목표 원가한도" value={formatWon(summary.profit_and_balance.target_cost_limit)} icon={<CheckCircle2 />} />
-              <SubMetric label="예상 최종원가" value={formatWon(summary.profit_and_balance.expected_final_cost)} icon={<ClipboardList />} />
-              <SubMetric
-                label="예상 이익 / 이익률"
-                value={`${formatWon(summary.profit_and_balance.expected_profit)} / ${summary.profit_and_balance.expected_profit_rate}%`}
-                icon={<BriefcaseBusiness />}
-                accent={summary.profit_and_balance.expected_profit >= 0 ? 'text-cyan-700' : 'text-rose-700'}
-              />
-              <SubMetric label="미발주 예정원가" value={formatWon(summary.profit_and_balance.unpurchased_budget_amount)} icon={<FileClock />} />
-              <SubMetric label="미기성금액" value={formatWon(summary.profit_and_balance.unbilled_amount)} icon={<Banknote />} />
-              <SubMetric label="승인 후 미지급" value={formatWon(summary.profit_and_balance.approved_unpaid_amount)} icon={<AlertTriangle />} />
-              <SubMetric label="총 미지급 잔액" value={formatWon(summary.profit_and_balance.total_unpaid_balance)} icon={<Banknote />} />
-            </section>
+            <ProjectOverview
+              project={selectedProject}
+              summary={summary}
+              executionBudget={executionBudget}
+              onBack={() => setSelectedProjectId(null)}
+              onStartConstruction={startConstruction}
+              onSynchronizePreparation={synchronizePreparationStatus}
+              onMoveToTab={moveToTab}
+            />
 
             <section ref={tabRef} className="rounded-md border border-slate-200 bg-white shadow-sm">
               <div className="flex flex-wrap gap-2 border-b border-slate-200 px-4 py-3">
@@ -1110,7 +906,7 @@ function App() {
                     setTargetProfitRate={setTargetProfitRate}
                     setSelectedFileType={setSelectedFileType}
                     saveCustomerContract={saveCustomerContract}
-                    correctAmountByExecutive={correctAmountByExecutive}
+                    openChangeManagement={() => setActivePage('changes')}
                     uploadContractFile={uploadContractFile}
                     deleteContractFile={deleteContractFile}
                     updateContractItem={updateContractItem}
@@ -1137,6 +933,7 @@ function App() {
                 {activeTab === '업체 비교견적' && executionBudget && vendorComparison && (
                   <VendorComparisonPanel
                     executionBudget={executionBudget}
+                    revisionProcurementItemIds={revisionProcurementItemIds}
                     selectedExecutionItemId={selectedExecutionItemId}
                     setSelectedExecutionItemId={setSelectedExecutionItemId}
                     vendorComparison={vendorComparison}
@@ -1152,7 +949,7 @@ function App() {
                   />
                 )}
                 {activeTab === '계약/발주 이력' && (
-                  <PurchaseOrderHistoryPanel purchaseOrders={purchaseOrderHistory} />
+                  <PurchaseOrderHistoryPanel purchaseOrders={purchaseOrderHistory} revisionNumber={purchaseOrderHistoryRevision} />
                 )}
                 {activeTab === '기성 및 지급 현황' && progressPayment && (
                   <ProgressPaymentPanel
@@ -1211,10 +1008,14 @@ function App() {
           </section>
         )}
 
+        {activePage === 'executive' && <ExecutiveDashboard />}
+
         {activePage === 'changes' && (
           <section className="rounded-md border border-slate-200 bg-white p-4 shadow-sm">
             {selectedProjectId ? (
-              <ChangeHistoryPanel changeOrders={changeOrders} />
+              <div className="space-y-8">
+                <RevisionManagementPanel projectId={selectedProjectId} projectCode={selectedProject?.project_code} projectName={selectedProject?.project_name} />
+              </div>
             ) : (
               <div className="rounded-md border border-dashed border-slate-300 bg-slate-50 p-8 text-center text-sm text-slate-500">
                 프로젝트 현황에서 프로젝트를 선택하면 해당 프로젝트의 변경관리 이력을 조회할 수 있습니다.

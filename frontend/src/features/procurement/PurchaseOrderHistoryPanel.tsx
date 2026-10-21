@@ -1,12 +1,18 @@
 import { formatDate, formatWon, varianceClass } from '../../lib/format'
 import type { PurchaseOrderHistoryItem } from '../../types/domain'
 
-export function PurchaseOrderHistoryPanel({ purchaseOrders }: { purchaseOrders: PurchaseOrderHistoryItem[] }) {
+export function PurchaseOrderHistoryPanel({ purchaseOrders, revisionNumber }: { purchaseOrders: PurchaseOrderHistoryItem[]; revisionNumber?: number }) {
+  const scopeName = revisionNumber ? `${revisionNumber}차 승인 실행예산` : '최초 승인 실행예산'
+
   return (
     <div>
       <div className="border-b border-slate-200 pb-4">
-        <h3 className="text-lg font-semibold text-slate-950">계약·발주 이력</h3>
-        <p className="mt-1 text-sm text-slate-500">발주 결재가 승인된 선정 업체만 정식 발주로 표시합니다.</p>
+        <h3 className="text-lg font-semibold text-slate-950">{revisionNumber ? `${revisionNumber}차 계약/발주 이력` : '최초 계약/발주 이력'}</h3>
+        <p className="mt-1 text-sm text-slate-500">
+          {revisionNumber
+            ? `${scopeName}에서 새로 진행한 비교견적·발주만 표시합니다. 이전 차수 발주는 이전 이력으로 보존됩니다.`
+            : '최초 승인 실행예산에서 진행한 비교견적·발주 이력입니다.'}
+        </p>
       </div>
       <div className="overflow-x-auto py-5">
         <table className="min-w-[1500px] text-left text-sm">
@@ -29,11 +35,10 @@ export function PurchaseOrderHistoryPanel({ purchaseOrders }: { purchaseOrders: 
                 <td className="px-3 py-3 text-slate-600"><p>{purchaseOrder.selection_reason || '-'}</p><p className="mt-1 text-xs">{purchaseOrder.construction_period || '-'} · {purchaseOrder.payment_terms || '-'}</p></td>
               </tr>
             ))}
-            {purchaseOrders.length === 0 && <tr><td colSpan={9} className="px-3 py-10 text-center text-slate-500">승인된 정식 발주가 없습니다.</td></tr>}
+            {purchaseOrders.length === 0 && <tr><td colSpan={9} className="px-3 py-10 text-center text-slate-500">{scopeName}에서 새로 승인된 발주가 없습니다. 업체 비교견적부터 새로 작성해 발주를 진행하세요.</td></tr>}
           </tbody>
         </table>
       </div>
     </div>
   )
 }
-

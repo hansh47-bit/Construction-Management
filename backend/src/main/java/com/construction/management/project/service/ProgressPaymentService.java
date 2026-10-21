@@ -12,12 +12,14 @@ import com.construction.management.project.domain.PaymentRequest;
 import com.construction.management.project.domain.ProgressClaim;
 import com.construction.management.project.domain.Project;
 import com.construction.management.project.domain.ProjectExecutionBudgetItem;
+import com.construction.management.project.domain.ProjectRevision;
 import com.construction.management.project.domain.PurchaseOrder;
 import com.construction.management.project.repository.ActualPaymentRepository;
 import com.construction.management.project.repository.PoChangeRepository;
 import com.construction.management.project.repository.PaymentRequestRepository;
 import com.construction.management.project.repository.ProgressClaimRepository;
 import com.construction.management.project.repository.ProjectRepository;
+import com.construction.management.project.repository.ProjectRevisionRepository;
 import com.construction.management.project.repository.ProjectExecutionBudgetItemRepository;
 import com.construction.management.project.repository.PurchaseOrderRepository;
 import jakarta.persistence.EntityNotFoundException;
@@ -34,6 +36,7 @@ import org.springframework.util.StringUtils;
 @Service
 public class ProgressPaymentService {
 	private final ProjectRepository projectRepository;
+	private final ProjectRevisionRepository revisionRepository;
 	private final PurchaseOrderRepository purchaseOrderRepository;
 	private final PoChangeRepository poChangeRepository;
 	private final ProgressClaimRepository progressClaimRepository;
@@ -43,8 +46,9 @@ public class ProgressPaymentService {
 	private final ProjectExecutionBudgetItemRepository budgetItemRepository;
 	private final ApprovalService approvalService;
 
-	public ProgressPaymentService(ProjectRepository projectRepository, PurchaseOrderRepository purchaseOrderRepository, PoChangeRepository poChangeRepository, ProgressClaimRepository progressClaimRepository, ActualPaymentRepository actualPaymentRepository, ProjectSettlementService projectSettlementService, PaymentRequestRepository paymentRequestRepository, ProjectExecutionBudgetItemRepository budgetItemRepository, ApprovalService approvalService) {
+	public ProgressPaymentService(ProjectRepository projectRepository, ProjectRevisionRepository revisionRepository, PurchaseOrderRepository purchaseOrderRepository, PoChangeRepository poChangeRepository, ProgressClaimRepository progressClaimRepository, ActualPaymentRepository actualPaymentRepository, ProjectSettlementService projectSettlementService, PaymentRequestRepository paymentRequestRepository, ProjectExecutionBudgetItemRepository budgetItemRepository, ApprovalService approvalService) {
 		this.projectRepository = projectRepository;
+		this.revisionRepository = revisionRepository;
 		this.purchaseOrderRepository = purchaseOrderRepository;
 		this.poChangeRepository = poChangeRepository;
 		this.progressClaimRepository = progressClaimRepository;
@@ -102,7 +106,9 @@ public class ProgressPaymentService {
 	}
 
 	private ProgressPaymentResponse toResponse(Project project) {
-		List<PurchaseOrder> pos = purchaseOrderRepository.findByProjectId(project.getProjectId());
+		ProjectRevision currentRevision = currentRevision(project.getProjectId());
+		List<PurchaseOrder> pos = purchaseOrderRepository.findByProjectIdAndRevisionIdOrderByPoIdDesc(
+				project.getProjectId(), currentRevision == null ? null : currentRevision.getRevisionId());
 		Map<String, ProjectExecutionBudgetItem> budgetItemsById = budgetItemRepository.findByProjectIdOrderByItemIdAsc(project.getProjectId()).stream()
 				.collect(Collectors.toMap(item -> ProjectExecutionBudgetItem.budgetItemId(project.getProjectId(), item.getItemId()), item -> item));
 		List<String> poIds = pos.stream().map(PurchaseOrder::getPoId).toList();
@@ -134,11 +140,13 @@ public class ProgressPaymentService {
 		}).toList();
 		long pendingPaymentApprovalCount = purchaseOrderStatuses.stream().filter(po -> ApprovalStatus.REQUESTED.name().equals(po.paymentRequestStatus())).count();
 		boolean allPaymentsApproved = !purchaseOrderStatuses.isEmpty() && purchaseOrderStatuses.stream().allMatch(po -> po.totalUnpaidBalance().signum() == 0);
-		return new ProgressPaymentResponse(project.getProjectId(), project.getProjectCode(), allPaymentsApproved, pendingPaymentApprovalCount, purchaseOrderStatuses);
+		return new ProgressPaymentResponse(project.getProjectId(), project.getProjectCode(), currentRevision == null ? null : currentRevision.getRevisionNumber(), allPaymentsApproved, pendingPaymentApprovalCount, purchaseOrderStatuses);
 	}
 
 	private void ensurePendingClaimApprovals(Project project) {
-		List<PurchaseOrder> purchaseOrders = purchaseOrderRepository.findByProjectId(project.getProjectId());
+		ProjectRevision currentRevision = currentRevision(project.getProjectId());
+		List<PurchaseOrder> purchaseOrders = purchaseOrderRepository.findByProjectIdAndRevisionIdOrderByPoIdDesc(
+				project.getProjectId(), currentRevision == null ? null : currentRevision.getRevisionId());
 		Map<String, PurchaseOrder> purchaseOrdersById = purchaseOrders.stream()
 				.collect(Collectors.toMap(PurchaseOrder::getPoId, purchaseOrder -> purchaseOrder));
 		List<String> poIds = purchaseOrders.stream().map(PurchaseOrder::getPoId).toList();
@@ -163,7 +171,15 @@ public class ProgressPaymentService {
 	private PurchaseOrder getPo(String projectId, String poId) {
 		PurchaseOrder po = purchaseOrderRepository.findById(poId).orElseThrow(() -> new EntityNotFoundException("발주를 찾을 수 없습니다: " + poId));
 		if (!projectId.equals(po.getProjectId())) throw new EntityNotFoundException("프로젝트에 속한 발주가 아닙니다.");
+		ProjectRevision revision = currentRevision(projectId);
+		if (!java.util.Objects.equals(revision == null ? null : revision.getRevisionId(), po.getRevisionId())) {
+			throw new IllegalArgumentException("현재 승인 차수의 신규 발주만 기성 및 지급 처리할 수 있습니다.");
+		}
 		return po;
+	}
+
+	private ProjectRevision currentRevision(String projectId) {
+		return revisionRepository.findTopByProjectIdAndStatusOrderByRevisionNumberDesc(projectId, "APPROVED").orElse(null);
 	}
 
 	private BigDecimal currentPoAmount(PurchaseOrder po) {

@@ -8,9 +8,10 @@ import org.springframework.data.jpa.repository.JpaRepository;
 public interface PurchaseOrderRepository extends JpaRepository<PurchaseOrder, String> {
 	List<PurchaseOrder> findByProjectId(String projectId);
 	List<PurchaseOrder> findByProjectIdOrderByPoIdDesc(String projectId);
+	List<PurchaseOrder> findByProjectIdAndRevisionIdOrderByPoIdDesc(String projectId, String revisionId);
 	Optional<PurchaseOrder> findByRequisitionId(String requisitionId);
 	List<PurchaseOrder> findByPoIdStartingWithOrderByPoIdDesc(String poIdPrefix);
-	boolean existsByProjectIdAndBudgetId(String projectId, String budgetId);
+	boolean existsByProjectIdAndBudgetIdAndRevisionId(String projectId, String budgetId, String revisionId);
 	boolean existsByProjectId(String projectId);
 	void deleteByProjectId(String projectId);
 }

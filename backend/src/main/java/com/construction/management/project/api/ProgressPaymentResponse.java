@@ -8,6 +8,7 @@ import java.util.List;
 public record ProgressPaymentResponse(
 		@JsonProperty("project_id") String projectId,
 		@JsonProperty("project_code") String projectCode,
+		@JsonProperty("revision_number") Integer revisionNumber,
 		@JsonProperty("all_payments_approved") boolean allPaymentsApproved,
 		@JsonProperty("pending_payment_approval_count") long pendingPaymentApprovalCount,
 		List<PurchaseOrderStatus> purchaseOrders

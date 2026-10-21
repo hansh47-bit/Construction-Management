@@ -10,12 +10,14 @@ import com.construction.management.project.domain.ProgressClaim;
 import com.construction.management.project.domain.Project;
 import com.construction.management.project.domain.ProjectExecutionBudgetItem;
 import com.construction.management.project.domain.PurchaseOrder;
+import com.construction.management.project.domain.ProjectRevision;
 import com.construction.management.project.repository.ActualPaymentRepository;
 import com.construction.management.project.repository.BudgetChangeRepository;
 import com.construction.management.project.repository.PoChangeRepository;
 import com.construction.management.project.repository.ProgressClaimRepository;
 import com.construction.management.project.repository.ProjectExecutionBudgetItemRepository;
 import com.construction.management.project.repository.ProjectRepository;
+import com.construction.management.project.repository.ProjectRevisionRepository;
 import com.construction.management.project.repository.PurchaseOrderRepository;
 import jakarta.persistence.EntityNotFoundException;
 import java.math.BigDecimal;
@@ -28,6 +30,7 @@ import org.springframework.transaction.annotation.Transactional;
 @Service
 public class PurchaseOrderService {
 	private final ProjectRepository projectRepository;
+	private final ProjectRevisionRepository revisionRepository;
 	private final PurchaseOrderRepository purchaseOrderRepository;
 	private final ProjectExecutionBudgetItemRepository budgetItemRepository;
 	private final PoChangeRepository poChangeRepository;
@@ -35,8 +38,9 @@ public class PurchaseOrderService {
 	private final ActualPaymentRepository actualPaymentRepository;
 	private final BudgetChangeRepository budgetChangeRepository;
 
-	public PurchaseOrderService(ProjectRepository projectRepository, PurchaseOrderRepository purchaseOrderRepository, ProjectExecutionBudgetItemRepository budgetItemRepository, PoChangeRepository poChangeRepository, ProgressClaimRepository progressClaimRepository, ActualPaymentRepository actualPaymentRepository, BudgetChangeRepository budgetChangeRepository) {
+	public PurchaseOrderService(ProjectRepository projectRepository, ProjectRevisionRepository revisionRepository, PurchaseOrderRepository purchaseOrderRepository, ProjectExecutionBudgetItemRepository budgetItemRepository, PoChangeRepository poChangeRepository, ProgressClaimRepository progressClaimRepository, ActualPaymentRepository actualPaymentRepository, BudgetChangeRepository budgetChangeRepository) {
 		this.projectRepository = projectRepository;
+		this.revisionRepository = revisionRepository;
 		this.purchaseOrderRepository = purchaseOrderRepository;
 		this.budgetItemRepository = budgetItemRepository;
 		this.poChangeRepository = poChangeRepository;
@@ -49,7 +53,9 @@ public class PurchaseOrderService {
 	public PurchaseOrderResponse getPurchaseOrders(String projectId) {
 		Project project = projectRepository.findById(projectId)
 				.orElseThrow(() -> new EntityNotFoundException("프로젝트를 찾을 수 없습니다: " + projectId));
-		List<PurchaseOrder> purchaseOrders = purchaseOrderRepository.findByProjectIdOrderByPoIdDesc(projectId);
+		ProjectRevision currentRevision = revisionRepository.findTopByProjectIdAndStatusOrderByRevisionNumberDesc(projectId, "APPROVED").orElse(null);
+		List<PurchaseOrder> purchaseOrders = purchaseOrderRepository.findByProjectIdAndRevisionIdOrderByPoIdDesc(
+				projectId, currentRevision == null ? null : currentRevision.getRevisionId());
 		List<String> poIds = purchaseOrders.stream().map(PurchaseOrder::getPoId).toList();
 		Map<String, BigDecimal> changesByPo = poIds.isEmpty() ? Map.of() : poChangeRepository.findByPoIdInAndApprovalStatus(poIds, ApprovalStatus.APPROVED).stream()
 				.collect(Collectors.groupingBy(PoChange::getPoId, Collectors.mapping(change -> zero(change.getChangeAmount()), Collectors.reducing(BigDecimal.ZERO, BigDecimal::add))));
@@ -61,7 +67,7 @@ public class PurchaseOrderService {
 		List<String> claimIds = claims.stream().map(ProgressClaim::getClaimId).toList();
 		Map<String, List<ActualPayment>> paymentsByClaim = claimIds.isEmpty() ? Map.of() : actualPaymentRepository.findByClaimIdIn(claimIds).stream().collect(Collectors.groupingBy(ActualPayment::getClaimId));
 
-		return new PurchaseOrderResponse(projectId, project.getProjectCode(), purchaseOrders.stream().map(po -> {
+		return new PurchaseOrderResponse(projectId, project.getProjectCode(), currentRevision == null ? null : currentRevision.getRevisionNumber(), purchaseOrders.stream().map(po -> {
 			ProjectExecutionBudgetItem budgetItem = budgetItemRepository.findByProjectIdAndBudgetItemId(projectId, po.getBudgetId()).orElse(null);
 			BigDecimal currentPoAmount = zero(po.getInitialPoAmount()).add(changesByPo.getOrDefault(po.getPoId(), BigDecimal.ZERO));
 			BigDecimal currentBudgetAmount = budgetItem == null ? zero(po.getApprovedBudgetAmount()) : zero(budgetItem.getApprovedBudgetAmount()).add(changesByBudget.getOrDefault(po.getBudgetId(), BigDecimal.ZERO));

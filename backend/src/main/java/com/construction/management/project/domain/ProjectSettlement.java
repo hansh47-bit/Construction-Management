@@ -19,6 +19,10 @@ public class ProjectSettlement {
 	@Column(name = "project_id", nullable = false, unique = true, length = 64)
 	private String projectId;
 
+	/** The approved execution-budget revision being settled. Null is the original budget. */
+	@Column(name = "revision_id", length = 64)
+	private String revisionId;
+
 	@Column(name = "initial_contract_amount", nullable = false, precision = 18, scale = 2)
 	private BigDecimal initialContractAmount;
 
@@ -58,6 +62,12 @@ public class ProjectSettlement {
 	@Column(name = "uncollected_receivable", nullable = false, precision = 18, scale = 2)
 	private BigDecimal uncollectedReceivable;
 
+	@Column(name = "settlement_expense", nullable = false, precision = 18, scale = 2)
+	private BigDecimal settlementExpense = BigDecimal.ZERO;
+
+	@Column(name = "settlement_tax", nullable = false, precision = 18, scale = 2)
+	private BigDecimal settlementTax = BigDecimal.ZERO;
+
 	@Column(name = "final_cost", nullable = false, precision = 18, scale = 2)
 	private BigDecimal finalCost;
 
@@ -89,8 +99,13 @@ public class ProjectSettlement {
 	}
 
 	public ProjectSettlement(String settlementId, String projectId) {
+		this(settlementId, projectId, null);
+	}
+
+	public ProjectSettlement(String settlementId, String projectId, String revisionId) {
 		this.settlementId = settlementId;
 		this.projectId = projectId;
+		this.revisionId = revisionId;
 	}
 
 	@PrePersist
@@ -101,6 +116,8 @@ public class ProjectSettlement {
 	public ProjectSettlement settle(
 			ProjectSettlementSnapshot snapshot,
 			BigDecimal uncollectedReceivable,
+			BigDecimal settlementExpense,
+			BigDecimal settlementTax,
 			String settlementNotes,
 			String unpaidHandlingReason,
 			String settledBy
@@ -118,6 +135,8 @@ public class ProjectSettlement {
 		this.actualPaidTotal = snapshot.actualPaidTotal();
 		this.unpaidBalance = snapshot.unpaidBalance();
 		this.uncollectedReceivable = uncollectedReceivable == null ? BigDecimal.ZERO : uncollectedReceivable;
+		this.settlementExpense = settlementExpense == null ? BigDecimal.ZERO : settlementExpense;
+		this.settlementTax = settlementTax == null ? BigDecimal.ZERO : settlementTax;
 		this.finalCost = snapshot.finalCost();
 		this.finalProfit = snapshot.finalProfit();
 		this.profitMarginRate = snapshot.profitMarginRate();
@@ -133,9 +152,14 @@ public class ProjectSettlement {
 		return settlementId;
 	}
 
+	public String getRevisionId() { return revisionId; }
+
 	public BigDecimal getUncollectedReceivable() {
 		return uncollectedReceivable;
 	}
+
+	public BigDecimal getSettlementExpense() { return settlementExpense; }
+	public BigDecimal getSettlementTax() { return settlementTax; }
 
 	public String getSettlementStatus() {
 		return settlementStatus;
@@ -170,6 +194,8 @@ public class ProjectSettlement {
 			BigDecimal approvedClaimsTotal,
 			BigDecimal actualPaidTotal,
 			BigDecimal unpaidBalance,
+			BigDecimal settlementExpense,
+			BigDecimal settlementTax,
 			BigDecimal finalCost,
 			BigDecimal finalProfit,
 			BigDecimal profitMarginRate

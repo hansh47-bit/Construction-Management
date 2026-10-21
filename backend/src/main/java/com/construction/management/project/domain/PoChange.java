@@ -29,6 +29,9 @@ public class PoChange {
 	@Column(name = "approval_status", nullable = false)
 	private ApprovalStatus approvalStatus = ApprovalStatus.APPROVED;
 
+	@Column(name = "approval_id", length = 64)
+	private String approvalId;
+
 	protected PoChange() {
 	}
 
@@ -51,4 +54,8 @@ public class PoChange {
 	public String getChangeId() { return changeId; }
 	public String getChangeCode() { return changeCode; }
 	public ApprovalStatus getApprovalStatus() { return approvalStatus; }
+	public String getApprovalId() { return approvalId; }
+	public void linkApproval(String approvalId) { this.approvalId = approvalId; this.approvalStatus = ApprovalStatus.REQUESTED; }
+	public void approve() { this.approvalStatus = ApprovalStatus.APPROVED; }
+	public void reject() { this.approvalStatus = ApprovalStatus.REJECTED; }
 }

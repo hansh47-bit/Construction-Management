@@ -6,6 +6,10 @@ import java.math.BigDecimal;
 public record ProjectSettlementCompleteRequest(
 		@JsonProperty("uncollected_receivable")
 		BigDecimal uncollectedReceivable,
+		@JsonProperty("settlement_expense")
+		BigDecimal settlementExpense,
+		@JsonProperty("settlement_tax")
+		BigDecimal settlementTax,
 		@JsonProperty("settlement_notes")
 		String settlementNotes,
 		@JsonProperty("force_complete_if_unpaid")

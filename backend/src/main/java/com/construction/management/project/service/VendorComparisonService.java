@@ -8,12 +8,14 @@ import com.construction.management.project.domain.ApprovalStatus;
 import com.construction.management.project.domain.BudgetChange;
 import com.construction.management.project.domain.Project;
 import com.construction.management.project.domain.ProjectExecutionBudgetItem;
+import com.construction.management.project.domain.ProjectRevision;
 import com.construction.management.project.domain.PurchaseOrder;
 import com.construction.management.project.domain.VendorComparison;
 import com.construction.management.project.repository.PoRequisitionRepository;
 import com.construction.management.project.repository.BudgetChangeRepository;
 import com.construction.management.project.repository.ProjectExecutionBudgetItemRepository;
 import com.construction.management.project.repository.ProjectRepository;
+import com.construction.management.project.repository.ProjectRevisionRepository;
 import com.construction.management.project.repository.PurchaseOrderRepository;
 import com.construction.management.project.repository.VendorComparisonRepository;
 import jakarta.persistence.EntityNotFoundException;
@@ -29,6 +31,7 @@ import org.springframework.web.server.ResponseStatusException;
 @Service
 public class VendorComparisonService {
 	private final ProjectRepository projectRepository;
+	private final ProjectRevisionRepository revisionRepository;
 	private final ProjectExecutionBudgetItemRepository budgetItemRepository;
 	private final VendorComparisonRepository comparisonRepository;
 	private final PoRequisitionRepository requisitionRepository;
@@ -38,8 +41,9 @@ public class VendorComparisonService {
 	private final BudgetChangeRepository budgetChangeRepository;
 	private final VendorComparisonAttachmentService attachmentService;
 
-	public VendorComparisonService(ProjectRepository projectRepository, ProjectExecutionBudgetItemRepository budgetItemRepository, VendorComparisonRepository comparisonRepository, PoRequisitionRepository requisitionRepository, PurchaseOrderRepository purchaseOrderRepository, ProjectSettlementService projectSettlementService, ApprovalService approvalService, BudgetChangeRepository budgetChangeRepository, VendorComparisonAttachmentService attachmentService) {
+	public VendorComparisonService(ProjectRepository projectRepository, ProjectRevisionRepository revisionRepository, ProjectExecutionBudgetItemRepository budgetItemRepository, VendorComparisonRepository comparisonRepository, PoRequisitionRepository requisitionRepository, PurchaseOrderRepository purchaseOrderRepository, ProjectSettlementService projectSettlementService, ApprovalService approvalService, BudgetChangeRepository budgetChangeRepository, VendorComparisonAttachmentService attachmentService) {
 		this.projectRepository = projectRepository;
+		this.revisionRepository = revisionRepository;
 		this.budgetItemRepository = budgetItemRepository;
 		this.comparisonRepository = comparisonRepository;
 		this.requisitionRepository = requisitionRepository;
@@ -62,7 +66,8 @@ public class VendorComparisonService {
 		projectSettlementService.assertNotSettled(projectId);
 		Project project = getProject(projectId);
 		ProjectExecutionBudgetItem item = getItem(projectId, itemId);
-		requisitionRepository.findTopByProjectIdAndExecutionItemIdOrderByCreatedAtDesc(projectId, itemId)
+		String revisionId = currentProcurementRevisionId(projectId);
+		requisitionRepository.findTopByProjectIdAndExecutionItemIdAndRevisionIdOrderByCreatedAtDesc(projectId, itemId, revisionId)
 				.filter(requisition -> ApprovalStatus.REQUESTED.name().equals(requisition.getApprovalStatus()) || ApprovalStatus.APPROVED.name().equals(requisition.getApprovalStatus()))
 				.ifPresent(requisition -> {
 					throw new IllegalStateException("결재 대기 또는 승인 완료 발주품의는 수정할 수 없습니다.");
@@ -82,13 +87,14 @@ public class VendorComparisonService {
 					throw new IllegalArgumentException("선정 업체는 선정 사유가 필요합니다.");
 				});
 
-		comparisonRepository.deleteByProjectIdAndExecutionItemId(projectId, itemId);
+		comparisonRepository.deleteByProjectIdAndExecutionItemIdAndRevisionId(projectId, itemId, revisionId);
 		List<VendorComparison> comparisons = request.comparisons().stream()
 				.filter(comparison -> StringUtils.hasText(comparison.vendorName()))
 				.map(comparison -> new VendorComparison(
 						StringUtils.hasText(comparison.comparisonCode()) ? comparison.comparisonCode() : nextComparisonCode(itemId),
 						projectId,
 						itemId,
+						revisionId,
 						comparison.vendorName(),
 						comparison.quotedAmount(),
 						comparison.vatType(),
@@ -110,12 +116,13 @@ public class VendorComparisonService {
 	) {
 		projectSettlementService.assertNotSettled(projectId);
 		getItem(projectId, itemId);
-		requisitionRepository.findTopByProjectIdAndExecutionItemIdOrderByCreatedAtDesc(projectId, itemId)
+		String revisionId = currentProcurementRevisionId(projectId);
+		requisitionRepository.findTopByProjectIdAndExecutionItemIdAndRevisionIdOrderByCreatedAtDesc(projectId, itemId, revisionId)
 				.filter(requisition -> ApprovalStatus.REQUESTED.name().equals(requisition.getApprovalStatus()) || ApprovalStatus.APPROVED.name().equals(requisition.getApprovalStatus()))
 				.ifPresent(requisition -> { throw new IllegalStateException("결재 대기 또는 승인된 발주품의의 비교견적에는 파일을 추가할 수 없습니다."); });
 		VendorComparison comparison = comparisonRepository.findById(comparisonId)
 				.orElseThrow(() -> new EntityNotFoundException("비교견적을 먼저 저장한 후 파일을 올려 주세요."));
-		if (!projectId.equals(comparison.getProjectId()) || !itemId.equals(comparison.getExecutionItemId())) {
+		if (!projectId.equals(comparison.getProjectId()) || !itemId.equals(comparison.getExecutionItemId()) || !java.util.Objects.equals(revisionId, comparison.getRevisionId())) {
 			throw new EntityNotFoundException("현재 실행항목에 속하지 않는 비교견적입니다.");
 		}
 		return attachmentService.save(projectId, itemId, comparisonId, file);
@@ -125,9 +132,10 @@ public class VendorComparisonService {
 	public PurchaseOrderDraftResponse getPurchaseOrderDraft(String projectId, String itemId) {
 		Project project = getProject(projectId);
 		ProjectExecutionBudgetItem item = getItem(projectId, itemId);
-		VendorComparison selected = comparisonRepository.findByProjectIdAndExecutionItemIdAndSelectedTrue(projectId, itemId)
+		String revisionId = currentProcurementRevisionId(projectId);
+		VendorComparison selected = comparisonRepository.findByProjectIdAndExecutionItemIdAndRevisionIdAndSelectedTrue(projectId, itemId, revisionId)
 				.orElseThrow(() -> new EntityNotFoundException("선정된 비교견적이 없습니다."));
-		PoRequisition requisition = requisitionRepository.findTopByProjectIdAndExecutionItemIdOrderByCreatedAtDesc(projectId, itemId).orElse(null);
+		PoRequisition requisition = requisitionRepository.findTopByProjectIdAndExecutionItemIdAndRevisionIdOrderByCreatedAtDesc(projectId, itemId, revisionId).orElse(null);
 		return toDraft(project, item, selected, requisition);
 	}
 
@@ -136,18 +144,19 @@ public class VendorComparisonService {
 		projectSettlementService.assertNotSettled(projectId);
 		Project project = getProject(projectId);
 		ProjectExecutionBudgetItem item = getItem(projectId, itemId);
+		String revisionId = currentProcurementRevisionId(projectId);
 		if (!item.isApproved()) {
 			throw new IllegalStateException("실행예산 승인 후 발주품의를 요청할 수 있습니다.");
 		}
-		VendorComparison selected = comparisonRepository.findByProjectIdAndExecutionItemIdAndSelectedTrue(projectId, itemId)
+		VendorComparison selected = comparisonRepository.findByProjectIdAndExecutionItemIdAndRevisionIdAndSelectedTrue(projectId, itemId, revisionId)
 				.orElseThrow(() -> new ResponseStatusException(HttpStatus.CONFLICT, "선정 업체를 저장한 후 발주품의를 요청할 수 있습니다."));
 		if (!StringUtils.hasText(selected.getSelectionReason())) {
 			throw new IllegalArgumentException("발주품의 요청 전 선정 사유가 필요합니다.");
 		}
-		if (!requisitionRepository.findByProjectIdAndExecutionItemIdAndApprovalStatus(projectId, itemId, "REQUESTED").isEmpty()) {
+		if (!requisitionRepository.findByProjectIdAndExecutionItemIdAndRevisionIdAndApprovalStatus(projectId, itemId, revisionId, "REQUESTED").isEmpty()) {
 			throw new IllegalArgumentException("이미 결재 대기 중인 발주품의가 있습니다.");
 		}
-		if (!requisitionRepository.findByProjectIdAndExecutionItemIdAndApprovalStatus(projectId, itemId, "APPROVED").isEmpty()) {
+		if (!requisitionRepository.findByProjectIdAndExecutionItemIdAndRevisionIdAndApprovalStatus(projectId, itemId, revisionId, "APPROVED").isEmpty()) {
 			throw new IllegalArgumentException("이미 승인된 발주품의가 있습니다.");
 		}
 		BigDecimal approvedBudget = currentBudgetAmount(item);
@@ -156,6 +165,7 @@ public class VendorComparisonService {
 				"REQ-PO-" + UUID.randomUUID().toString().substring(0, 8),
 				projectId,
 				itemId,
+				revisionId,
 				selected.getComparisonId(),
 				approvedBudget,
 				selected.getQuotedAmount(),
@@ -178,7 +188,9 @@ public class VendorComparisonService {
 				item.getCategoryName(),
 				item.getItemName(),
 				budgetAmount,
-				comparisonRepository.findByProjectIdAndExecutionItemIdOrderByComparisonIdAsc(project.getProjectId(), budgetItemId).stream()
+				comparisonRepository.findByProjectIdAndExecutionItemIdAndRevisionIdOrderByComparisonIdAsc(
+						project.getProjectId(), budgetItemId, currentProcurementRevisionId(project.getProjectId())
+				).stream()
 						.map(comparison -> new VendorComparisonResponse.Item(
 								comparison.getComparisonId(),
 								comparison.getComparisonId(),
@@ -230,6 +242,12 @@ public class VendorComparisonService {
 
 	private String nextComparisonCode(String itemId) {
 		return "CMP-" + itemId.replace("EX-", "") + "-" + UUID.randomUUID().toString().substring(0, 4).toUpperCase();
+	}
+
+	private String currentProcurementRevisionId(String projectId) {
+		return revisionRepository.findTopByProjectIdAndStatusOrderByRevisionNumberDesc(projectId, "APPROVED")
+				.map(ProjectRevision::getRevisionId)
+				.orElse(null);
 	}
 
 	private BigDecimal currentBudgetAmount(ProjectExecutionBudgetItem item) {

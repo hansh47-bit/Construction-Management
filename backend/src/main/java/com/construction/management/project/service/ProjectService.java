@@ -34,6 +34,7 @@ import com.construction.management.project.repository.ProjectContractRepository;
 import com.construction.management.project.repository.ProjectExecutionBudgetDetailRepository;
 import com.construction.management.project.repository.ProjectExecutionBudgetItemRepository;
 import com.construction.management.project.repository.ProjectRepository;
+import com.construction.management.project.repository.ProjectRevisionRepository;
 import com.construction.management.project.repository.ProjectSettlementRepository;
 import com.construction.management.project.repository.PurchaseOrderRepository;
 import com.construction.management.project.repository.VendorComparisonRepository;
@@ -84,6 +85,7 @@ public class ProjectService {
 	private final ProjectExecutionBudgetDetailRepository projectExecutionBudgetDetailRepository;
 	private final ProjectSettlementRepository projectSettlementRepository;
 	private final VendorComparisonRepository vendorComparisonRepository;
+	private final ProjectRevisionRepository projectRevisionRepository;
 
 	public ProjectService(
 			ProjectRepository projectRepository,
@@ -106,7 +108,8 @@ public class ProjectService {
 			PoRequisitionRepository poRequisitionRepository,
 			ProjectExecutionBudgetDetailRepository projectExecutionBudgetDetailRepository,
 			ProjectSettlementRepository projectSettlementRepository,
-			VendorComparisonRepository vendorComparisonRepository
+			VendorComparisonRepository vendorComparisonRepository,
+			ProjectRevisionRepository projectRevisionRepository
 	) {
 		this.projectRepository = projectRepository;
 		this.projectContractRepository = projectContractRepository;
@@ -129,6 +132,7 @@ public class ProjectService {
 		this.projectExecutionBudgetDetailRepository = projectExecutionBudgetDetailRepository;
 		this.projectSettlementRepository = projectSettlementRepository;
 		this.vendorComparisonRepository = vendorComparisonRepository;
+		this.projectRevisionRepository = projectRevisionRepository;
 	}
 
 	@Transactional
@@ -227,6 +231,7 @@ public class ProjectService {
 		executionBudgetRepository.deleteByProjectId(projectId);
 		contractChangeRepository.deleteByProjectId(projectId);
 		changeOrderRepository.deleteByProjectId(projectId);
+		projectRevisionRepository.deleteByProjectId(projectId);
 		customerContractItemRepository.deleteByProjectId(projectId);
 		projectContractRepository.deleteByProjectId(projectId);
 		projectSettlementRepository.deleteByProjectId(projectId);

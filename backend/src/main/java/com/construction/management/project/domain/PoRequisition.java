@@ -22,6 +22,10 @@ public class PoRequisition {
 	@Column(name = "execution_item_id", nullable = false, length = 64)
 	private String executionItemId;
 
+	/** The approved execution-budget revision this requisition belongs to. Null is the original budget. */
+	@Column(name = "revision_id", length = 64)
+	private String revisionId;
+
 	@Column(name = "selected_comparison_id", nullable = false, length = 64)
 	private String selectedComparisonId;
 
@@ -61,10 +65,11 @@ public class PoRequisition {
 	protected PoRequisition() {
 	}
 
-	public PoRequisition(String requisitionId, String projectId, String executionItemId, String selectedComparisonId, BigDecimal approvedBudgetAmount, BigDecimal poAmount, BigDecimal budgetVariance, String selectionReason, String requestedBy) {
+	public PoRequisition(String requisitionId, String projectId, String executionItemId, String revisionId, String selectedComparisonId, BigDecimal approvedBudgetAmount, BigDecimal poAmount, BigDecimal budgetVariance, String selectionReason, String requestedBy) {
 		this.requisitionId = requisitionId;
 		this.projectId = projectId;
 		this.executionItemId = executionItemId;
+		this.revisionId = revisionId;
 		this.selectedComparisonId = selectedComparisonId;
 		this.approvedBudgetAmount = approvedBudgetAmount;
 		this.poAmount = poAmount;
@@ -99,6 +104,7 @@ public class PoRequisition {
 	public String getRequisitionId() { return requisitionId; }
 	public String getProjectId() { return projectId; }
 	public String getExecutionItemId() { return executionItemId; }
+	public String getRevisionId() { return revisionId; }
 	public String getSelectedComparisonId() { return selectedComparisonId; }
 	public BigDecimal getApprovedBudgetAmount() { return approvedBudgetAmount; }
 	public BigDecimal getPoAmount() { return poAmount; }

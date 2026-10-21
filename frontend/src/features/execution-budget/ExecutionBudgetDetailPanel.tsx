@@ -43,13 +43,14 @@ export function ExecutionBudgetDetailPanel({
   const pagedDetails = details.slice(pageStart, pageStart + pageSize)
   const isLocked = executionBudget.approval_status === 'REQUESTED' || executionBudget.approval_status === 'APPROVED'
   const displayedBudgetAmount = executionBudget.approval_status === 'APPROVED' ? (executionBudget.approved_amount ?? totalAmount) : totalAmount
+  const appliedRevisionLabel = executionBudget.applied_revision_number ? `${executionBudget.applied_revision_number}차 승인본` : '최초 승인본'
 
   return (
     <div>
       <div className="flex flex-col gap-4 border-b border-slate-200 pb-4 lg:flex-row lg:items-center lg:justify-between">
         <div>
-          <h3 className="text-lg font-semibold text-slate-950">세부실행예산 입력</h3>
-          <p className="mt-1 text-sm text-slate-500">세부 항목의 수량과 단가를 입력하면 실행항목ID별 상위 예산이 자동 집계됩니다.</p>
+          <div className="flex flex-wrap items-center gap-2"><h3 className="text-lg font-semibold text-slate-950">세부실행예산</h3><span className="rounded-full bg-cyan-100 px-2.5 py-1 text-xs font-bold text-cyan-800">{appliedRevisionLabel}</span></div>
+          <p className="mt-1 text-sm text-slate-500">승인된 변경 차수가 있으면 해당 차수의 세부 항목과 금액을 표시합니다. 최초 원본은 변경이력에 보존됩니다.</p>
         </div>
         <button
           type="button"
@@ -69,7 +70,7 @@ export function ExecutionBudgetDetailPanel({
         <MetricPanel
           label="세부실행예산 총합계"
           value={formatWon(displayedBudgetAmount)}
-          helper={`결재상태 ${executionBudget.approval_status}`}
+          helper={`${appliedRevisionLabel} · 결재상태 ${executionBudget.approval_status}`}
           accent={executionBudget.over_target_limit || displayedBudgetAmount > executionBudget.target_cost_limit ? 'text-rose-700' : 'text-cyan-700'}
         />
       </div>
@@ -139,7 +140,7 @@ export function ExecutionBudgetDetailPanel({
       </div>
 
       <div className="py-5">
-        <h3 className="mb-3 text-sm font-semibold text-slate-900">세부실행예산 입력 항목</h3>
+        <h3 className="mb-3 text-sm font-semibold text-slate-900">{appliedRevisionLabel} 세부실행예산 항목</h3>
         <div className="mb-3 flex justify-end text-xs font-medium text-slate-500">
           {details.length > 0 ? `${pageStart + 1}-${Math.min(pageStart + pageSize, details.length)} / ${details.length}` : '0 / 0'}
         </div>

@@ -42,6 +42,10 @@ public class ApprovalService {
 	public static final String TYPE_EXECUTION_BUDGET = "EXECUTION_BUDGET";
 	public static final String TYPE_PURCHASE_ORDER = "PURCHASE_ORDER";
 	public static final String TYPE_PROGRESS_CLAIM = "PROGRESS_CLAIM";
+	public static final String TYPE_CONTRACT_CHANGE = "CONTRACT_CHANGE";
+	public static final String TYPE_BUDGET_CHANGE = "BUDGET_CHANGE";
+	public static final String TYPE_PO_CHANGE = "PO_CHANGE";
+	public static final String TYPE_PROJECT_REVISION = "PROJECT_REVISION";
 
 	private final ApprovalRepository approvalRepository;
 	private final ProjectRepository projectRepository;
@@ -56,6 +60,8 @@ public class ApprovalService {
 	private final PaymentRequestService paymentRequestService;
 	private final ExecutionBudgetApprovalAttachmentService attachmentService;
 	private final VendorComparisonAttachmentService vendorComparisonAttachmentService;
+	private final ChangeManagementService changeManagementService;
+	private final ProjectRevisionService projectRevisionService;
 
 	public ApprovalService(
 			ApprovalRepository approvalRepository,
@@ -70,7 +76,9 @@ public class ApprovalService {
 			ProjectSettlementService projectSettlementService,
 			PaymentRequestService paymentRequestService,
 			ExecutionBudgetApprovalAttachmentService attachmentService,
-			VendorComparisonAttachmentService vendorComparisonAttachmentService
+			VendorComparisonAttachmentService vendorComparisonAttachmentService,
+			ChangeManagementService changeManagementService,
+			ProjectRevisionService projectRevisionService
 	) {
 		this.approvalRepository = approvalRepository;
 		this.projectRepository = projectRepository;
@@ -85,6 +93,8 @@ public class ApprovalService {
 		this.paymentRequestService = paymentRequestService;
 		this.attachmentService = attachmentService;
 		this.vendorComparisonAttachmentService = vendorComparisonAttachmentService;
+		this.changeManagementService = changeManagementService;
+		this.projectRevisionService = projectRevisionService;
 	}
 
 	@Transactional(readOnly = true)
@@ -273,6 +283,10 @@ public class ApprovalService {
 			approveProgressClaim(approval);
 		} else if (PaymentRequestService.TYPE_PAYMENT.equals(approval.getApprovalType())) {
 			paymentRequestService.approve(approval, request);
+		} else if (isChangeApproval(approval)) {
+			changeManagementService.approveChangeApproval(approval);
+		} else if (TYPE_PROJECT_REVISION.equals(approval.getApprovalType())) {
+			projectRevisionService.approveRevision(approval.getProjectId(), approval.getTargetId(), approval.getApprovalId());
 		} else {
 			throw new IllegalArgumentException("지원하지 않는 결재 유형입니다: " + approval.getApprovalType());
 		}
@@ -302,10 +316,20 @@ public class ApprovalService {
 			progressClaimRepository.save(claim);
 		} else if (PaymentRequestService.TYPE_PAYMENT.equals(approval.getApprovalType())) {
 			paymentRequestService.reject(approval);
+		} else if (isChangeApproval(approval)) {
+			changeManagementService.rejectChangeApproval(approval);
+		} else if (TYPE_PROJECT_REVISION.equals(approval.getApprovalType())) {
+			projectRevisionService.rejectRevision(approval.getProjectId(), approval.getTargetId());
 		}
 		approval.reject(decisionUser(request), request.comment());
 		approvalRepository.save(approval);
 		return ApprovalResponse.from(approval, getProject(approval.getProjectId()), detailFor(approval), attachmentsFor(approval));
+	}
+
+	private static boolean isChangeApproval(Approval approval) {
+		return TYPE_CONTRACT_CHANGE.equals(approval.getApprovalType())
+				|| TYPE_BUDGET_CHANGE.equals(approval.getApprovalType())
+				|| TYPE_PO_CHANGE.equals(approval.getApprovalType());
 	}
 
 	@Transactional
@@ -360,7 +384,7 @@ public class ApprovalService {
 		if (!item.isApproved()) {
 			throw new IllegalStateException("실행예산 승인 후 발주를 승인할 수 있습니다.");
 		}
-		if (purchaseOrderRepository.existsByProjectIdAndBudgetId(approval.getProjectId(), requisition.getExecutionItemId())) {
+		if (purchaseOrderRepository.existsByProjectIdAndBudgetIdAndRevisionId(approval.getProjectId(), requisition.getExecutionItemId(), requisition.getRevisionId())) {
 			throw new IllegalStateException("이미 승인된 발주가 있는 실행항목입니다.");
 		}
 		VendorComparison selected = comparisonRepository.findById(requisition.getSelectedComparisonId())
@@ -406,7 +430,8 @@ public class ApprovalService {
 					.orElseThrow(() -> new EntityNotFoundException("실행항목을 찾을 수 없습니다: " + requisition.getExecutionItemId()));
 			VendorComparison selected = comparisonRepository.findById(requisition.getSelectedComparisonId())
 					.orElseThrow(() -> new EntityNotFoundException("선정 비교견적을 찾을 수 없습니다: " + requisition.getSelectedComparisonId()));
-			List<VendorComparisonResponse.Item> comparisons = comparisonRepository.findByProjectIdAndExecutionItemIdOrderByComparisonIdAsc(approval.getProjectId(), requisition.getExecutionItemId()).stream()
+			List<VendorComparisonResponse.Item> comparisons = comparisonRepository.findByProjectIdAndExecutionItemIdAndRevisionIdOrderByComparisonIdAsc(
+					approval.getProjectId(), requisition.getExecutionItemId(), requisition.getRevisionId()).stream()
 					.map(comparison -> new VendorComparisonResponse.Item(
 							comparison.getComparisonId(),
 							comparison.getComparisonId(),
@@ -457,8 +482,8 @@ public class ApprovalService {
 		}
 		if (TYPE_PURCHASE_ORDER.equals(approval.getApprovalType())) {
 			PoRequisition requisition = getRequisition(approval);
-			return comparisonRepository.findByProjectIdAndExecutionItemIdOrderByComparisonIdAsc(
-					approval.getProjectId(), requisition.getExecutionItemId())
+			return comparisonRepository.findByProjectIdAndExecutionItemIdAndRevisionIdOrderByComparisonIdAsc(
+					approval.getProjectId(), requisition.getExecutionItemId(), requisition.getRevisionId())
 					.stream()
 					.flatMap(comparison -> vendorComparisonAttachmentService.getResponses(
 							approval.getProjectId(), requisition.getExecutionItemId(), comparison.getComparisonId()).stream())

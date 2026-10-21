@@ -8,5 +8,6 @@ import org.springframework.data.jpa.repository.JpaRepository;
 public interface BudgetChangeRepository extends JpaRepository<BudgetChange, String> {
 	List<BudgetChange> findByBudgetIdInAndApprovalStatus(List<String> budgetIds, ApprovalStatus approvalStatus);
 	List<BudgetChange> findByBudgetIdIn(List<String> budgetIds);
+	List<BudgetChange> findByChangeCode(String changeCode);
 	void deleteByBudgetIdIn(List<String> budgetIds);
 }

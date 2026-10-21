@@ -1,8 +1,12 @@
 package com.construction.management.project.service;
 
 import com.construction.management.project.api.ChangeOrderResponse;
+import com.construction.management.project.api.ChangeOrderCreateRequest;
+import com.construction.management.project.api.ContractChangeRequest;
+import com.construction.management.project.api.BudgetChangeProposalRequest;
 import com.construction.management.project.api.ExecutiveCorrectionRequest;
 import com.construction.management.project.domain.ActualPayment;
+import com.construction.management.project.domain.Approval;
 import com.construction.management.project.domain.ApprovalStatus;
 import com.construction.management.project.domain.BudgetChange;
 import com.construction.management.project.domain.ChangeOrder;
@@ -14,6 +18,7 @@ import com.construction.management.project.domain.Project;
 import com.construction.management.project.domain.ProjectExecutionBudgetItem;
 import com.construction.management.project.domain.PurchaseOrder;
 import com.construction.management.project.repository.ActualPaymentRepository;
+import com.construction.management.project.repository.ApprovalRepository;
 import com.construction.management.project.repository.BudgetChangeRepository;
 import com.construction.management.project.repository.ChangeOrderRepository;
 import com.construction.management.project.repository.ContractChangeRepository;
@@ -52,6 +57,7 @@ public class ChangeManagementService {
 	private final PoChangeRepository poChangeRepository;
 	private final ProgressClaimRepository progressClaimRepository;
 	private final ActualPaymentRepository actualPaymentRepository;
+	private final ApprovalRepository approvalRepository;
 	private final ProjectSettlementService projectSettlementService;
 
 	public ChangeManagementService(
@@ -65,6 +71,7 @@ public class ChangeManagementService {
 			PoChangeRepository poChangeRepository,
 			ProgressClaimRepository progressClaimRepository,
 			ActualPaymentRepository actualPaymentRepository,
+			ApprovalRepository approvalRepository,
 			ProjectSettlementService projectSettlementService
 	) {
 		this.projectRepository = projectRepository;
@@ -77,7 +84,147 @@ public class ChangeManagementService {
 		this.poChangeRepository = poChangeRepository;
 		this.progressClaimRepository = progressClaimRepository;
 		this.actualPaymentRepository = actualPaymentRepository;
+		this.approvalRepository = approvalRepository;
 		this.projectSettlementService = projectSettlementService;
+	}
+
+	@Transactional
+	public ChangeOrderResponse createChangeOrder(String projectId, ChangeOrderCreateRequest request) {
+		projectSettlementService.assertNotSettled(projectId);
+		projectRepository.findById(projectId).orElseThrow(() -> new EntityNotFoundException("Project not found: " + projectId));
+		boolean contractChangeEnabled = Boolean.TRUE.equals(request.contractChangeEnabled());
+		boolean budgetChangeEnabled = Boolean.TRUE.equals(request.budgetChangeEnabled());
+		if (!contractChangeEnabled && !budgetChangeEnabled) {
+			throw new IllegalArgumentException("At least one change scope must be selected.");
+		}
+		ChangeOrder order = changeOrderRepository.save(new ChangeOrder(
+				nextChangeCode(), projectId, request.title(), request.reason(),
+				request.requestedBy() == null || request.requestedBy().isBlank() ? "system" : request.requestedBy(),
+				nextRevisionNumber(projectId), contractChangeEnabled, budgetChangeEnabled));
+		return response(order, BigDecimal.ZERO, BigDecimal.ZERO, BigDecimal.ZERO, false, null, List.of());
+	}
+
+	@Transactional
+	public ChangeOrderResponse saveContractProposal(String projectId, String changeOrderId, ContractChangeRequest request) {
+		ChangeOrder order = requiredOrder(projectId, changeOrderId);
+		ensureDraft(order);
+		if (!order.hasContractChange()) throw new IllegalStateException("This revision does not include a contract change.");
+		if (request.changeAmount().signum() == 0) throw new IllegalArgumentException("계약 증감액은 0원이 될 수 없습니다.");
+		if (!contractChangeRepository.findByChangeCode(changeOrderId).isEmpty()) throw new IllegalStateException("계약 변경안은 변경 건마다 한 번만 작성할 수 있습니다.");
+		contractChangeRepository.save(new ContractChange(id(), projectId, changeOrderId, request.changeAmount(), request.reason(), ApprovalStatus.DRAFT));
+		return responseFor(projectId, order);
+	}
+
+	@Transactional
+	public ChangeOrderResponse saveBudgetProposal(String projectId, String changeOrderId, BudgetChangeProposalRequest request) {
+		ChangeOrder order = requiredOrder(projectId, changeOrderId);
+		ensureDraft(order);
+		if (!order.hasBudgetChange()) throw new IllegalStateException("This revision does not include an execution-budget change.");
+		if (!order.hasContractChange()) return saveBudgetOnlyProposal(projectId, changeOrderId, request, order);
+		if (contractChangeRepository.findByChangeCode(changeOrderId).isEmpty()) throw new IllegalStateException("계약 변경안을 먼저 작성해야 실행예산 변경안을 만들 수 있습니다.");
+		if (!budgetChangeRepository.findByChangeCode(changeOrderId).isEmpty()) throw new IllegalStateException("실행예산 변경안은 변경 건마다 한 번만 작성할 수 있습니다.");
+		Map<String, ProjectExecutionBudgetItem> budgetItems = budgetItemRepository.findByProjectIdOrderByItemIdAsc(projectId).stream()
+				.collect(Collectors.toMap(ProjectExecutionBudgetItem::getItemId, Function.identity()));
+		for (BudgetChangeProposalRequest.Item item : request.items()) {
+			ProjectExecutionBudgetItem budgetItem = budgetItems.get(item.budgetItemId());
+			if (budgetItem == null || !budgetItem.isApproved()) throw new IllegalArgumentException("승인된 프로젝트 실행예산 항목이 아닙니다: " + item.budgetItemId());
+			budgetChangeRepository.save(new BudgetChange(id(), item.budgetItemId(), changeOrderId, item.changeAmount(), ApprovalStatus.DRAFT));
+		}
+		createPurchaseOrderProposals(changeOrderId, purchaseOrderRepository.findByProjectId(projectId), budgetChangeRepository.findByChangeCode(changeOrderId));
+		return responseFor(projectId, order);
+	}
+
+	private ChangeOrderResponse saveBudgetOnlyProposal(String projectId, String changeOrderId, BudgetChangeProposalRequest request, ChangeOrder order) {
+		if (request.items() == null || request.items().isEmpty()) throw new IllegalArgumentException("At least one execution-budget item must be changed.");
+		if (!budgetChangeRepository.findByChangeCode(changeOrderId).isEmpty()) throw new IllegalStateException("Only one execution-budget proposal may be created for a revision.");
+		Map<String, ProjectExecutionBudgetItem> budgetItems = budgetItemRepository.findByProjectIdOrderByItemIdAsc(projectId).stream()
+				.collect(Collectors.toMap(ProjectExecutionBudgetItem::getItemId, Function.identity()));
+		for (BudgetChangeProposalRequest.Item item : request.items()) {
+			ProjectExecutionBudgetItem budgetItem = budgetItems.get(item.budgetItemId());
+			if (budgetItem == null || !budgetItem.isApproved()) throw new IllegalArgumentException("Execution-budget item is not approved: " + item.budgetItemId());
+			if (item.changeAmount() == null || item.changeAmount().signum() == 0) throw new IllegalArgumentException("Execution-budget change amount must not be zero.");
+			budgetChangeRepository.save(new BudgetChange(id(), item.budgetItemId(), changeOrderId, item.changeAmount(), ApprovalStatus.DRAFT));
+		}
+		createPurchaseOrderProposals(changeOrderId, purchaseOrderRepository.findByProjectId(projectId), budgetChangeRepository.findByChangeCode(changeOrderId));
+		return responseFor(projectId, order);
+	}
+
+	@Transactional
+	public ChangeOrderResponse requestApproval(String projectId, String changeOrderId) {
+		ChangeOrder order = requiredOrder(projectId, changeOrderId);
+		ensureDraft(order);
+		List<ContractChange> contractChanges = contractChangeRepository.findByChangeCode(changeOrderId);
+		List<BudgetChange> budgetChanges = budgetChangeRepository.findByChangeCode(changeOrderId);
+		List<PoChange> poChanges = poChangeRepository.findByChangeCode(changeOrderId);
+		if (!order.hasContractChange()) return requestBudgetOnlyApproval(projectId, changeOrderId, order, budgetChanges, poChanges);
+		if (!order.hasBudgetChange()) return requestContractOnlyApproval(projectId, changeOrderId, order, contractChanges);
+		if (contractChanges.size() != 1 || budgetChanges.isEmpty()) throw new IllegalStateException("계약 변경안과 실행예산 변경안을 모두 작성한 후 결재 요청할 수 있습니다.");
+		List<String> conflicts = reconciliationConflicts(purchaseOrderRepository.findByProjectId(projectId), poChanges.stream().collect(Collectors.toMap(PoChange::getPoId, PoChange::getChangeAmount)));
+		if (!conflicts.isEmpty()) {
+			order.markReconciliationRequired();
+			changeOrderRepository.save(order);
+			return responseFor(projectId, order, String.join(" ", conflicts));
+		}
+		createApproval(projectId, changeOrderId, "CONTRACT_CHANGE", "고객 계약 변경 결재", contractChanges.get(0).getChangeAmount(), currentContractAmount(projectId), order.getReason());
+		createApproval(projectId, changeOrderId, "BUDGET_CHANGE", "실행예산 변경 결재", sumBudgetChanges(budgetChanges), currentExecutionBudget(projectId), order.getReason());
+		if (!poChanges.isEmpty()) createApproval(projectId, changeOrderId, "PO_CHANGE", "발주 변경 결재", sumPoChanges(poChanges), currentPurchaseAmount(projectId), order.getReason());
+		order.markRequested();
+		changeOrderRepository.save(order);
+		return responseFor(projectId, order);
+	}
+
+	private ChangeOrderResponse requestContractOnlyApproval(String projectId, String changeOrderId, ChangeOrder order, List<ContractChange> contractChanges) {
+		if (contractChanges.size() != 1) throw new IllegalStateException("Contract change details must be completed before requesting approval.");
+		createApproval(projectId, changeOrderId, "CONTRACT_CHANGE", "Contract change approval", contractChanges.get(0).getChangeAmount(), currentContractAmount(projectId), order.getReason());
+		order.markRequested();
+		changeOrderRepository.save(order);
+		return responseFor(projectId, order);
+	}
+
+	private ChangeOrderResponse requestBudgetOnlyApproval(String projectId, String changeOrderId, ChangeOrder order, List<BudgetChange> budgetChanges, List<PoChange> poChanges) {
+		if (budgetChanges.isEmpty()) throw new IllegalStateException("Execution-budget change details must be completed before requesting approval.");
+		List<String> conflicts = reconciliationConflicts(purchaseOrderRepository.findByProjectId(projectId), poChanges.stream().collect(Collectors.toMap(PoChange::getPoId, PoChange::getChangeAmount)));
+		if (!conflicts.isEmpty()) {
+			order.markReconciliationRequired();
+			changeOrderRepository.save(order);
+			return responseFor(projectId, order, String.join(" ", conflicts));
+		}
+		createApproval(projectId, changeOrderId, "BUDGET_CHANGE", "Execution-budget change approval", sumBudgetChanges(budgetChanges), currentExecutionBudget(projectId), order.getReason());
+		if (!poChanges.isEmpty()) createApproval(projectId, changeOrderId, "PO_CHANGE", "Purchase-order change approval", sumPoChanges(poChanges), currentPurchaseAmount(projectId), order.getReason());
+		order.markRequested();
+		changeOrderRepository.save(order);
+		return responseFor(projectId, order);
+	}
+
+	@Transactional(readOnly = true)
+	public ChangeOrderResponse getImpactSummary(String projectId, String changeOrderId) {
+		return responseFor(projectId, requiredOrder(projectId, changeOrderId));
+	}
+
+	@Transactional(readOnly = true)
+	public ChangeOrderResponse getReconciliation(String projectId, String changeOrderId) {
+		ChangeOrder order = requiredOrder(projectId, changeOrderId);
+		List<PoChange> changes = poChangeRepository.findByChangeCode(changeOrderId);
+		List<String> conflicts = reconciliationConflicts(purchaseOrderRepository.findByProjectId(projectId), changes.stream().collect(Collectors.toMap(PoChange::getPoId, PoChange::getChangeAmount)));
+		return responseFor(projectId, order, conflicts.isEmpty() ? null : String.join(" ", conflicts));
+	}
+
+	@Transactional
+	public void approveChangeApproval(Approval approval) {
+		String code = approval.getTargetId();
+		if ("CONTRACT_CHANGE".equals(approval.getApprovalType())) contractChangeRepository.findByChangeCode(code).forEach(change -> { change.approve(); contractChangeRepository.save(change); });
+		if ("BUDGET_CHANGE".equals(approval.getApprovalType())) budgetChangeRepository.findByChangeCode(code).forEach(change -> { change.approve(); budgetChangeRepository.save(change); });
+		if ("PO_CHANGE".equals(approval.getApprovalType())) poChangeRepository.findByChangeCode(code).forEach(change -> { change.approve(); poChangeRepository.save(change); });
+		refreshStatus(approval.getProjectId(), code);
+	}
+
+	@Transactional
+	public void rejectChangeApproval(Approval approval) {
+		String code = approval.getTargetId();
+		if ("CONTRACT_CHANGE".equals(approval.getApprovalType())) contractChangeRepository.findByChangeCode(code).forEach(change -> { change.reject(); contractChangeRepository.save(change); });
+		if ("BUDGET_CHANGE".equals(approval.getApprovalType())) budgetChangeRepository.findByChangeCode(code).forEach(change -> { change.reject(); budgetChangeRepository.save(change); });
+		if ("PO_CHANGE".equals(approval.getApprovalType())) poChangeRepository.findByChangeCode(code).forEach(change -> { change.reject(); poChangeRepository.save(change); });
+		refreshStatus(approval.getProjectId(), code);
 	}
 
 	@Transactional
@@ -120,6 +267,8 @@ public class ChangeManagementService {
 		contractChangeRepository.save(new ContractChange(id(), projectId, changeCode, contractDelta, request.reason(), ApprovalStatus.APPROVED));
 		budgetDeltas.forEach((budgetId, delta) -> budgetChangeRepository.save(new BudgetChange(id(), budgetId, changeCode, delta, ApprovalStatus.APPROVED)));
 		poDeltas.forEach((poId, delta) -> poChangeRepository.save(new PoChange(id(), poId, changeCode, delta, ApprovalStatus.APPROVED)));
+		order.markApproved();
+		changeOrderRepository.save(order);
 		return response(order, contractDelta, budgetDelta, poDelta, false, null, impacts);
 	}
 
@@ -192,8 +341,97 @@ public class ChangeManagementService {
 	}
 
 	private ChangeOrderResponse response(ChangeOrder order, BigDecimal contractDelta, BigDecimal budgetDelta, BigDecimal poDelta, boolean requiresReconciliation, String message, List<ChangeOrderResponse.Impact> impacts) {
-		return new ChangeOrderResponse(order.getChangeOrderId(), order.getProjectId(), order.getTitle(), order.getReason(), order.getRequestedBy(), order.getStatus(), order.getCreatedAt(), contractDelta, budgetDelta, poDelta, requiresReconciliation, message, impacts);
+		return new ChangeOrderResponse(order.getChangeOrderId(), order.getProjectId(), order.getTitle(), order.getReason(), order.getRequestedBy(), order.getStatus(), order.getCreatedAt(), order.getRevisionNumber(), order.hasContractChange(), order.hasBudgetChange(), contractDelta, budgetDelta, poDelta, requiresReconciliation, message, impacts);
 	}
+
+	private ChangeOrder requiredOrder(String projectId, String changeOrderId) {
+		ChangeOrder order = changeOrderRepository.findById(changeOrderId).orElseThrow(() -> new EntityNotFoundException("변경 건을 찾을 수 없습니다: " + changeOrderId));
+		if (!projectId.equals(order.getProjectId())) throw new IllegalArgumentException("다른 프로젝트의 변경 건입니다.");
+		return order;
+	}
+
+	private static void ensureDraft(ChangeOrder order) {
+		if (!"DRAFT".equals(order.getStatus())) throw new IllegalStateException("작성 중인 변경 건만 수정할 수 있습니다.");
+	}
+
+	private void createPurchaseOrderProposals(String changeCode, List<PurchaseOrder> orders, List<BudgetChange> budgetChanges) {
+		Map<String, List<PurchaseOrder>> byBudget = orders.stream().collect(Collectors.groupingBy(PurchaseOrder::getBudgetId));
+		for (BudgetChange budgetChange : budgetChanges) {
+			List<PurchaseOrder> linked = byBudget.getOrDefault(budgetChange.getBudgetId(), List.of());
+			if (linked.isEmpty()) continue;
+			allocate(linked, PurchaseOrder::getInitialPoAmount, budgetChange.getChangeAmount()).forEach((poId, amount) ->
+					poChangeRepository.save(new PoChange(id(), poId, changeCode, amount, ApprovalStatus.DRAFT)));
+		}
+	}
+
+	private void createApproval(String projectId, String changeCode, String type, String title, BigDecimal delta, BigDecimal previous, String reason) {
+		Approval approval = new Approval(id(), projectId, type, changeCode, changeCode + " " + title,
+				previous.add(delta), previous, delta, "system", reason);
+		approvalRepository.save(approval);
+		if ("CONTRACT_CHANGE".equals(type)) contractChangeRepository.findByChangeCode(changeCode).forEach(change -> { change.linkApproval(approval.getApprovalId()); contractChangeRepository.save(change); });
+		if ("BUDGET_CHANGE".equals(type)) budgetChangeRepository.findByChangeCode(changeCode).forEach(change -> { change.linkApproval(approval.getApprovalId()); budgetChangeRepository.save(change); });
+		if ("PO_CHANGE".equals(type)) poChangeRepository.findByChangeCode(changeCode).forEach(change -> { change.linkApproval(approval.getApprovalId()); poChangeRepository.save(change); });
+	}
+
+	private void refreshStatus(String projectId, String changeCode) {
+		ChangeOrder order = requiredOrder(projectId, changeCode);
+		List<ContractChange> contractChanges = contractChangeRepository.findByChangeCode(changeCode);
+		List<BudgetChange> budgetChanges = budgetChangeRepository.findByChangeCode(changeCode);
+		List<PoChange> poChanges = poChangeRepository.findByChangeCode(changeCode);
+		List<ApprovalStatus> statuses = new ArrayList<>();
+		contractChanges.forEach(change -> statuses.add(change.getApprovalStatus()));
+		budgetChanges.forEach(change -> statuses.add(change.getApprovalStatus()));
+		poChanges.forEach(change -> statuses.add(change.getApprovalStatus()));
+		if (statuses.stream().anyMatch(status -> status == ApprovalStatus.REJECTED)) order.markRejected();
+		else if (statuses.stream().allMatch(status -> status == ApprovalStatus.APPROVED)) order.markApproved();
+		else if (statuses.stream().anyMatch(status -> status == ApprovalStatus.APPROVED)) order.markPartiallyApproved();
+		else order.markRequested();
+		changeOrderRepository.save(order);
+	}
+
+	private ChangeOrderResponse responseFor(String projectId, ChangeOrder order) { return responseFor(projectId, order, null); }
+
+	private ChangeOrderResponse responseFor(String projectId, ChangeOrder order, String reconciliationMessage) {
+		List<ProjectExecutionBudgetItem> budgetItems = budgetItemRepository.findByProjectIdOrderByItemIdAsc(projectId);
+		Map<String, ProjectExecutionBudgetItem> budgetById = budgetItems.stream().collect(Collectors.toMap(ProjectExecutionBudgetItem::getItemId, Function.identity()));
+		List<PurchaseOrder> purchaseOrders = purchaseOrderRepository.findByProjectId(projectId);
+		Map<String, PurchaseOrder> poById = purchaseOrders.stream().collect(Collectors.toMap(PurchaseOrder::getPoId, Function.identity()));
+		List<ChangeOrderResponse.Impact> impacts = new ArrayList<>();
+		List<ContractChange> contractChanges = contractChangeRepository.findByChangeCode(order.getChangeOrderId());
+		List<BudgetChange> budgetChanges = budgetChangeRepository.findByChangeCode(order.getChangeOrderId());
+		List<PoChange> poChanges = poChangeRepository.findByChangeCode(order.getChangeOrderId());
+		contractChanges.forEach(change -> impacts.add(new ChangeOrderResponse.Impact("CONTRACT", projectId, "Customer contract", change.getChangeAmount())));
+		budgetChanges.forEach(change -> {
+			ProjectExecutionBudgetItem item = budgetById.get(change.getBudgetId());
+			impacts.add(new ChangeOrderResponse.Impact("BUDGET", change.getBudgetId(), item == null ? change.getBudgetId() : item.getCategoryName() + " / " + item.getItemName(), change.getChangeAmount()));
+		});
+		poChanges.forEach(change -> {
+			PurchaseOrder po = poById.get(change.getPoId());
+			impacts.add(new ChangeOrderResponse.Impact("PURCHASE_ORDER", change.getPoId(), po == null ? change.getPoId() : po.getVendorName(), change.getChangeAmount()));
+		});
+		return response(order, sumContractChanges(contractChanges), sumBudgetChanges(budgetChanges), sumPoChanges(poChanges),
+				"RECONCILIATION_REQUIRED".equals(order.getStatus()), reconciliationMessage, impacts);
+	}
+
+	private BigDecimal currentExecutionBudget(String projectId) {
+		List<ProjectExecutionBudgetItem> items = budgetItemRepository.findByProjectIdOrderByItemIdAsc(projectId);
+		List<String> ids = items.stream().map(ProjectExecutionBudgetItem::getItemId).toList();
+		Map<String, BigDecimal> changes = ids.isEmpty() ? Map.of() : budgetChangeRepository.findByBudgetIdInAndApprovalStatus(ids, ApprovalStatus.APPROVED).stream()
+				.collect(Collectors.groupingBy(BudgetChange::getBudgetId, Collectors.mapping(BudgetChange::getChangeAmount, Collectors.reducing(BigDecimal.ZERO, BigDecimal::add))));
+		return items.stream().map(item -> zero(item.getApprovedBudgetAmount()).add(changes.getOrDefault(item.getItemId(), BigDecimal.ZERO))).reduce(BigDecimal.ZERO, BigDecimal::add);
+	}
+
+	private BigDecimal currentPurchaseAmount(String projectId) {
+		List<PurchaseOrder> orders = purchaseOrderRepository.findByProjectId(projectId);
+		List<String> ids = orders.stream().map(PurchaseOrder::getPoId).toList();
+		Map<String, BigDecimal> changes = ids.isEmpty() ? Map.of() : poChangeRepository.findByPoIdInAndApprovalStatus(ids, ApprovalStatus.APPROVED).stream()
+				.collect(Collectors.groupingBy(PoChange::getPoId, Collectors.mapping(PoChange::getChangeAmount, Collectors.reducing(BigDecimal.ZERO, BigDecimal::add))));
+		return orders.stream().map(order -> zero(order.getInitialPoAmount()).add(changes.getOrDefault(order.getPoId(), BigDecimal.ZERO))).reduce(BigDecimal.ZERO, BigDecimal::add);
+	}
+
+	private static BigDecimal sumContractChanges(List<ContractChange> changes) { return changes.stream().map(ContractChange::getChangeAmount).map(ChangeManagementService::zero).reduce(BigDecimal.ZERO, BigDecimal::add); }
+	private static BigDecimal sumBudgetChanges(List<BudgetChange> changes) { return changes.stream().map(BudgetChange::getChangeAmount).map(ChangeManagementService::zero).reduce(BigDecimal.ZERO, BigDecimal::add); }
+	private static BigDecimal sumPoChanges(List<PoChange> changes) { return changes.stream().map(PoChange::getChangeAmount).map(ChangeManagementService::zero).reduce(BigDecimal.ZERO, BigDecimal::add); }
 
 	private BigDecimal currentContractAmount(String projectId) {
 		BigDecimal initial = customerContractItemRepository.findByProjectIdOrderByWorkCategoryAsc(projectId).stream().map(CustomerContractItem::getContractAmount).map(ChangeManagementService::zero).reduce(BigDecimal.ZERO, BigDecimal::add);
@@ -205,6 +443,15 @@ public class ChangeManagementService {
 		String prefix = "CHG-" + Year.now().getValue() + "-";
 		int seq = changeOrderRepository.findByChangeOrderIdStartingWithOrderByChangeOrderIdDesc(prefix).stream().map(ChangeOrder::getChangeOrderId).map(code -> code.substring(prefix.length())).mapToInt(value -> { try { return Integer.parseInt(value); } catch (NumberFormatException ignored) { return 0; } }).max().orElse(0) + 1;
 		return "%s%03d".formatted(prefix, seq);
+	}
+
+	private int nextRevisionNumber(String projectId) {
+		return changeOrderRepository.findByProjectIdOrderByCreatedAtDesc(projectId).stream()
+				.map(ChangeOrder::getRevisionNumber)
+				.filter(java.util.Objects::nonNull)
+				.mapToInt(Integer::intValue)
+				.max()
+				.orElse(1) + 1;
 	}
 
 	private static <T> Map<String, BigDecimal> allocate(List<T> targets, Function<T, BigDecimal> amount, BigDecimal total) {

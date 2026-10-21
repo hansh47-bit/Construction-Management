@@ -18,8 +18,8 @@ export function formatNumber(value: number) {
   return currency.format(Math.round(value || 0))
 }
 
-export function toNumber(value: string) {
-  return Number(value.replaceAll(',', '') || 0)
+export function toNumber(value: string | number) {
+	return typeof value === 'number' ? value : Number(value.replaceAll(',', '') || 0)
 }
 
 export function varianceClass(value: number) {
@@ -30,6 +30,8 @@ export function varianceClass(value: number) {
 
 const workflowStatusLabels: Record<string, string> = {
   DRAFT: '초안',
+  CONTRACT_WRITTEN: '계약 작성 완료',
+  BUDGET_WRITTEN: '실행예산 작성 완료',
   PENDING: '대기',
   REQUESTED: '결재 대기',
   APPROVED: '승인',

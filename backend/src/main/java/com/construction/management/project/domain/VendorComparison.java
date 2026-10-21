@@ -23,6 +23,10 @@ public class VendorComparison {
 	@Column(name = "execution_item_id", nullable = false, length = 64)
 	private String executionItemId;
 
+	/** The approved execution-budget revision this comparison belongs to. Null is the original budget. */
+	@Column(name = "revision_id", length = 64)
+	private String revisionId;
+
 	@Column(name = "vendor_name", nullable = false)
 	private String vendorName;
 
@@ -59,10 +63,11 @@ public class VendorComparison {
 	protected VendorComparison() {
 	}
 
-	public VendorComparison(String comparisonId, String projectId, String executionItemId, String vendorName, BigDecimal quotedAmount, String vatType, String constructionPeriod, String scopeAndNotes, String paymentTerms, String estimateFileUrl, boolean selected, String selectionReason) {
+	public VendorComparison(String comparisonId, String projectId, String executionItemId, String revisionId, String vendorName, BigDecimal quotedAmount, String vatType, String constructionPeriod, String scopeAndNotes, String paymentTerms, String estimateFileUrl, boolean selected, String selectionReason) {
 		this.comparisonId = comparisonId;
 		this.projectId = projectId;
 		this.executionItemId = executionItemId;
+		this.revisionId = revisionId;
 		this.vendorName = vendorName;
 		this.quotedAmount = quotedAmount == null ? BigDecimal.ZERO : quotedAmount;
 		this.vatType = vatType == null ? "별도" : vatType;
@@ -89,6 +94,7 @@ public class VendorComparison {
 	public String getComparisonId() { return comparisonId; }
 	public String getProjectId() { return projectId; }
 	public String getExecutionItemId() { return executionItemId; }
+	public String getRevisionId() { return revisionId; }
 	public String getVendorName() { return vendorName; }
 	public BigDecimal getQuotedAmount() { return quotedAmount; }
 	public String getVatType() { return vatType; }
