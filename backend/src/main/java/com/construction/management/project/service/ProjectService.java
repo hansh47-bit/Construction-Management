@@ -192,16 +192,6 @@ public class ProjectService {
 		Project project = projectRepository.findById(projectId)
 				.orElseThrow(() -> new EntityNotFoundException("프로젝트를 찾을 수 없습니다: " + projectId));
 
-		boolean isSettled = "정산완료".equals(project.getStatus().name()) || projectSettlementRepository.findByProjectId(projectId)
-				.map(settlement -> "SETTLED".equals(settlement.getSettlementStatus()))
-				.orElse(false);
-		if (isSettled) {
-			throw new ResponseStatusException(
-					HttpStatus.CONFLICT,
-					"정산완료된 프로젝트는 삭제할 수 없습니다."
-			);
-		}
-
 		List<String> purchaseOrderIds = purchaseOrderRepository.findByProjectId(projectId).stream()
 				.map(PurchaseOrder::getPoId)
 				.toList();

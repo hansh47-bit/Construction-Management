@@ -88,8 +88,7 @@ export function ProjectList({
                         event.stopPropagation()
                         onDelete(project)
                       }}
-                      disabled={project.status === '정산완료'}
-                      className="inline-flex flex-col items-center rounded-md border border-rose-200 px-2.5 py-1.5 text-xs font-semibold text-rose-700 hover:bg-rose-50 disabled:cursor-not-allowed disabled:border-slate-200 disabled:text-slate-400 disabled:hover:bg-transparent"
+                      className="inline-flex flex-col items-center rounded-md border border-rose-200 px-2.5 py-1.5 text-xs font-semibold text-rose-700 hover:bg-rose-50"
                       aria-label={`${project.project_name} 삭제`}
                     >
                       <Trash2 className="h-3.5 w-3.5" aria-hidden="true" />

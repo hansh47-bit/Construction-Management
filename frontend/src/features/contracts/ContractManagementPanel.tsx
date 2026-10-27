@@ -46,6 +46,10 @@ export function ContractManagementPanel({
 }) {
   const [isSaving, setIsSaving] = useState(false)
   const [saveNotice, setSaveNotice] = useState<string | null>(null)
+  const currentContractSupplyAmount = contract.current_contract_supply_amount ?? contractTotal.supply
+  const targetProfitRateNumber = Number(targetProfitRate || 0)
+  const targetProfitAmount = currentContractSupplyAmount * (targetProfitRateNumber / 100)
+  const targetCostLimit = currentContractSupplyAmount - targetProfitAmount
 
   async function handleSaveCustomerContract() {
     if (isSaving) return
@@ -95,7 +99,7 @@ export function ContractManagementPanel({
         </div>
       )}
 
-      <div className="grid gap-4 border-b border-slate-200 py-5 lg:grid-cols-[260px_1fr_1fr]">
+      <div className="grid gap-4 border-b border-slate-200 py-5 lg:grid-cols-[260px_1fr_1fr_1fr]">
         <label className="block text-sm font-semibold text-slate-700">
           목표이익률 (%)
           <input
@@ -108,12 +112,18 @@ export function ContractManagementPanel({
         </label>
         <MetricPanel
           label="계약 총 공급가액"
-          value={formatWon(contract.current_contract_supply_amount ?? contractTotal.supply)}
+          value={formatWon(currentContractSupplyAmount)}
           helper={`최초 ${formatWon(contract.total_contract_supply_amount)} · VAT ${formatWon(contractTotal.vat)}`}
         />
         <MetricPanel
+          label="목표 이익"
+          value={formatWon(targetProfitAmount)}
+          helper={`목표 이익률 ${targetProfitRateNumber}% 기준`}
+          accent="text-blue-700"
+        />
+        <MetricPanel
           label="목표원가한도"
-          value={formatWon(contract.target_cost_limit)}
+          value={formatWon(targetCostLimit)}
           helper="현재 계약 공급가액 × (1 - 목표이익률)"
           accent="text-cyan-700"
         />

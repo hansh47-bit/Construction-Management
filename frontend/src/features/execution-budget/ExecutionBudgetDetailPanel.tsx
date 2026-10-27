@@ -53,6 +53,13 @@ export function ExecutionBudgetDetailPanel({
   // 승인 이력의 집계값은 변경 전 항목을 포함할 수 있어 상세 행 합계와 달라질 수 있다.
   const displayedBudgetAmount = totalAmount
   const appliedRevisionLabel = executionBudget.applied_revision_number ? `${executionBudget.applied_revision_number}차 승인본` : '최초 승인본'
+  const costTypesByBudgetItem = new Map<string, string>()
+  details.forEach((detail) => {
+    const current = costTypesByBudgetItem.get(detail.budget_item_id)?.split(' · ').filter(Boolean) ?? []
+    if (detail.cost_type && !current.includes(detail.cost_type)) {
+      costTypesByBudgetItem.set(detail.budget_item_id, [...current, detail.cost_type].join(' · '))
+    }
+  })
 
   return (
     <div>
@@ -130,7 +137,7 @@ export function ExecutionBudgetDetailPanel({
               <tr>
                 <th className="px-3 py-3">실행항목ID</th>
                 <th className="px-3 py-3">공종</th>
-                <th className="px-3 py-3">실행항목</th>
+                <th className="px-3 py-3">원가구분</th>
                 <th className="px-3 py-3">집계금액</th>
               </tr>
             </thead>
@@ -139,7 +146,7 @@ export function ExecutionBudgetDetailPanel({
                 <tr key={item.budget_item_id}>
                   <td className="px-3 py-3 font-semibold text-slate-900">{item.budget_item_id}</td>
                   <td className="px-3 py-3 text-slate-600">{item.category_name}</td>
-                  <td className="px-3 py-3 text-slate-600">{item.item_name}</td>
+                  <td className="px-3 py-3 text-slate-600">{costTypesByBudgetItem.get(item.budget_item_id) || '-'}</td>
                   <td className="px-3 py-3 font-semibold text-slate-900">{formatWon(item.rolled_up_amount)}</td>
                 </tr>
               ))}
