@@ -491,9 +491,14 @@ public class ApprovalService {
 			ProjectSettlement settlement = settlementRepository.findById(approval.getTargetId())
 					.orElseThrow(() -> new EntityNotFoundException("준공정산 요청을 찾을 수 없습니다: " + approval.getTargetId()));
 			ProjectSettlement.ProjectSettlementSnapshot snapshot = settlement.snapshot();
+			BigDecimal settlementSiteExpense = settlement.getSettlementSiteExpense();
+			BigDecimal settlementLaborExpense = settlement.getSettlementLaborExpense();
+			if (settlementSiteExpense.add(settlementLaborExpense).signum() == 0 && defaultZero(settlement.getSettlementExpense()).signum() != 0) {
+				settlementSiteExpense = settlement.getSettlementExpense();
+			}
 			return new ApprovalResponse.FinalSettlementDetail(
 					snapshot.finalContractAmount(), snapshot.finalBudgetAmount(), snapshot.finalPoAmount(),
-					settlement.getSettlementExpense(), settlement.getSettlementTax(), snapshot.unpaidBalance(),
+					settlement.getSettlementExpense(), settlementSiteExpense, settlementLaborExpense, settlement.getSettlementTax(), snapshot.unpaidBalance(),
 					snapshot.finalCost(), snapshot.finalProfit(), snapshot.profitMarginRate()
 			);
 		}

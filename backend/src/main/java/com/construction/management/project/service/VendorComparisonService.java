@@ -272,9 +272,9 @@ public class VendorComparisonService {
 
 	private void assertProcurementRequired(String projectId, String itemId) {
 		List<ProjectExecutionBudgetDetail> details = budgetDetailRepository.findByProjectIdAndBudgetItemIdOrderByDetailIdAsc(projectId, itemId);
-		boolean siteExpenseOnly = !details.isEmpty() && details.stream().allMatch(detail -> "현장경비".equals(detail.getCostType()));
-		if (siteExpenseOnly) {
-			throw new IllegalStateException("현장경비 실행항목은 업체 비교견적 및 발주 대상이 아닙니다. 준공정산의 준공경비에서 처리해 주세요.");
+		boolean directSettlementOnly = !details.isEmpty() && details.stream().allMatch(detail -> ProjectExecutionBudgetDetail.isDirectSettlementCostType(detail.getCostType()));
+		if (directSettlementOnly) {
+			throw new IllegalStateException("현장경비·인건비 실행항목은 업체 비교견적 및 발주 대상이 아닙니다. 준공정산의 직접 정산비에서 처리해 주세요.");
 		}
 	}
 }

@@ -78,7 +78,7 @@ export function VendorComparisonPanel({
       </div>
 
 		{!hasApprovedItems && (
-			<p className="border-b border-slate-200 py-5 text-sm text-slate-500">{revisionProcurementItemIds !== null ? '승인된 차수의 발주 대상 실행예산 항목이 없습니다. 현장경비 항목은 준공정산의 준공경비로 자동 반영됩니다.' : '승인된 발주 대상 실행예산 항목이 있어야 업체 비교견적을 작성할 수 있습니다. 현장경비 항목은 준공정산에서 처리합니다.'}</p>
+			<p className="border-b border-slate-200 py-5 text-sm text-slate-500">{revisionProcurementItemIds !== null ? '승인된 차수의 발주 대상 실행예산 항목이 없습니다. 현장경비·인건비 항목은 준공정산의 직접 정산비로 자동 반영됩니다.' : '승인된 발주 대상 실행예산 항목이 있어야 업체 비교견적을 작성할 수 있습니다. 현장경비·인건비 항목은 준공정산에서 처리합니다.'}</p>
 		)}
       <div className="grid gap-4 border-b border-slate-200 py-5 lg:grid-cols-[260px_1fr_1fr_1fr]">
         <label className="block text-sm font-semibold text-slate-700">

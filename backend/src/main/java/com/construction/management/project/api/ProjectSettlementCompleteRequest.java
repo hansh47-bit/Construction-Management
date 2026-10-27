@@ -8,6 +8,10 @@ public record ProjectSettlementCompleteRequest(
 		BigDecimal uncollectedReceivable,
 		@JsonProperty("settlement_expense")
 		BigDecimal settlementExpense,
+		@JsonProperty("settlement_site_expense")
+		BigDecimal settlementSiteExpense,
+		@JsonProperty("settlement_labor_expense")
+		BigDecimal settlementLaborExpense,
 		@JsonProperty("settlement_tax")
 		BigDecimal settlementTax,
 		@JsonProperty("settlement_notes")

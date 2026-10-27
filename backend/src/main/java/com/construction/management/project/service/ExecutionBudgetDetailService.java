@@ -254,6 +254,6 @@ public class ExecutionBudgetDetailService {
 
 	private static boolean requiresProcurement(List<Detail> details) {
 		return details == null || details.isEmpty()
-				|| details.stream().anyMatch(detail -> !"현장경비".equals(detail.costType()));
+				|| details.stream().anyMatch(detail -> !ProjectExecutionBudgetDetail.isDirectSettlementCostType(detail.costType()));
 	}
 }

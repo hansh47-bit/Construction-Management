@@ -150,6 +150,8 @@ public record ApprovalResponse(
 			@JsonProperty("final_execution_budget") BigDecimal finalExecutionBudget,
 			@JsonProperty("final_purchase_order_amount") BigDecimal finalPurchaseOrderAmount,
 			@JsonProperty("settlement_expense") BigDecimal settlementExpense,
+			@JsonProperty("settlement_site_expense") BigDecimal settlementSiteExpense,
+			@JsonProperty("settlement_labor_expense") BigDecimal settlementLaborExpense,
 			@JsonProperty("settlement_tax") BigDecimal settlementTax,
 			@JsonProperty("unpaid_balance") BigDecimal unpaidBalance,
 			@JsonProperty("final_cost") BigDecimal finalCost,

@@ -8,10 +8,13 @@ import jakarta.persistence.PreUpdate;
 import jakarta.persistence.Table;
 import java.math.BigDecimal;
 import java.time.LocalDateTime;
+import java.util.Set;
 
 @Entity
 @Table(name = "project_execution_budget_details")
 public class ProjectExecutionBudgetDetail {
+
+	private static final Set<String> DIRECT_SETTLEMENT_COST_TYPES = Set.of("현장경비", "인건비");
 
 	@Id
 	@Column(name = "detail_id", nullable = false, length = 64)
@@ -153,6 +156,10 @@ public class ProjectExecutionBudgetDetail {
 
 	public String getNote() {
 		return note;
+	}
+
+	public static boolean isDirectSettlementCostType(String costType) {
+		return DIRECT_SETTLEMENT_COST_TYPES.contains(costType);
 	}
 
 	private static BigDecimal defaultZero(BigDecimal value) {

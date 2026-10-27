@@ -11,18 +11,19 @@ export function SettlementPanel({
   requestSettlementApproval,
 }: {
   settlement: ProjectSettlement
-  form: { uncollected_receivable: string; settlement_expense: string; settlement_tax: string; settlement_notes: string; force_complete_if_unpaid: boolean; unpaid_handling_reason: string }
-  setForm: (value: { uncollected_receivable: string; settlement_expense: string; settlement_tax: string; settlement_notes: string; force_complete_if_unpaid: boolean; unpaid_handling_reason: string }) => void
+  form: { uncollected_receivable: string; settlement_site_expense: string; settlement_labor_expense: string; settlement_tax: string; settlement_notes: string; force_complete_if_unpaid: boolean; unpaid_handling_reason: string }
+  setForm: (value: { uncollected_receivable: string; settlement_site_expense: string; settlement_labor_expense: string; settlement_tax: string; settlement_notes: string; force_complete_if_unpaid: boolean; unpaid_handling_reason: string }) => void
   requestSettlementApproval: () => void
 }) {
   const hasUnpaidBalance = settlement.payments.unpaid_balance > 0
   const approvalPending = settlement.settlement_status === 'REQUESTED'
   const editingDisabled = settlement.is_settled || approvalPending
-  const settlementExpense = toNumber(form.settlement_expense)
+  const settlementSiteExpense = toNumber(form.settlement_site_expense)
+  const settlementLaborExpense = toNumber(form.settlement_labor_expense)
   const settlementTax = toNumber(form.settlement_tax)
   const snapshotIncludesSettlementInputs = settlement.settlement_status === 'REQUESTED' || settlement.settlement_status === 'REJECTED' || settlement.is_settled
-  const savedSettlementInputs = snapshotIncludesSettlementInputs ? settlement.settlement_expense + settlement.settlement_tax : 0
-  const previewFinalCost = settlement.profitability.final_cost - savedSettlementInputs + settlementExpense + settlementTax
+  const savedSettlementInputs = snapshotIncludesSettlementInputs ? settlement.settlement_site_expense + settlement.settlement_labor_expense + settlement.settlement_tax : 0
+  const previewFinalCost = settlement.profitability.final_cost - savedSettlementInputs + settlementSiteExpense + settlementLaborExpense + settlementTax
   const previewFinalProfit = settlement.contract.final_amount - previewFinalCost
   const previewProfitMarginRate = settlement.contract.final_amount === 0 ? 0 : (previewFinalProfit / settlement.contract.final_amount) * 100
   const revisionNumber = settlement.revision_number
@@ -107,11 +108,16 @@ export function SettlementPanel({
               <dt className="mb-2 text-slate-500">미수금</dt>
               <dd><MoneyInput value={toNumber(form.uncollected_receivable)} onChange={(value) => setForm({ ...form, uncollected_receivable: value })} disabled={editingDisabled} /></dd>
             </div>
-            <div className="grid gap-3 border-t border-slate-100 pt-4 sm:grid-cols-2">
+            <div className="grid gap-3 border-t border-slate-100 pt-4 sm:grid-cols-3">
               <label className="block text-sm font-semibold text-slate-700">
-                준공 경비
-                <span className="mt-1 block text-xs font-normal text-slate-500">승인된 현장경비 {formatWon(settlement.approved_site_expense)}이 기본 입력되며, 실제 집행액으로 수정할 수 있습니다.</span>
-                <MoneyInput value={settlementExpense} onChange={(value) => setForm({ ...form, settlement_expense: value })} disabled={editingDisabled} className="mt-2" />
+				현장경비
+				<span className="mt-1 block text-xs font-normal text-slate-500">승인된 현장경비 {formatWon(settlement.approved_site_expense_amount)}이 기본 입력되며, 실제 집행액으로 수정할 수 있습니다.</span>
+                <MoneyInput value={settlementSiteExpense} onChange={(value) => setForm({ ...form, settlement_site_expense: value })} disabled={editingDisabled} className="mt-2" />
+              </label>
+              <label className="block text-sm font-semibold text-slate-700">
+				인건비
+				<span className="mt-1 block text-xs font-normal text-slate-500">승인된 인건비 {formatWon(settlement.approved_labor_expense_amount)}이 기본 입력되며, 실제 집행액으로 수정할 수 있습니다.</span>
+                <MoneyInput value={settlementLaborExpense} onChange={(value) => setForm({ ...form, settlement_labor_expense: value })} disabled={editingDisabled} className="mt-2" />
               </label>
               <label className="block text-sm font-semibold text-slate-700">
                 준공 세금

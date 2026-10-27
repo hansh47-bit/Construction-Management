@@ -17,6 +17,7 @@ import com.construction.management.project.domain.ExecutionBudget;
 import com.construction.management.project.domain.PoChange;
 import com.construction.management.project.domain.ProgressClaim;
 import com.construction.management.project.domain.Project;
+import com.construction.management.project.domain.ProjectExecutionBudgetDetail;
 import com.construction.management.project.domain.ProjectExecutionBudgetItem;
 import com.construction.management.project.domain.ProjectRevision;
 import com.construction.management.project.domain.ProjectStatus;
@@ -385,6 +386,15 @@ public class ProjectService {
 				.map(PurchaseOrder::getBudgetId)
 				.filter(StringUtils::hasText)
 				.collect(Collectors.toSet());
+		Map<String, List<ProjectExecutionBudgetDetail>> executionDetailsByBudgetItem = projectExecutionBudgetDetailRepository
+				.findByProjectIdOrderByBudgetItemIdAscDetailIdAsc(projectId).stream()
+				.collect(Collectors.groupingBy(ProjectExecutionBudgetDetail::getBudgetItemId));
+		Set<String> directSettlementOnlyBudgetItemIds = executionDetailsByBudgetItem.entrySet().stream()
+				.filter(entry -> !entry.getValue().isEmpty())
+				.filter(entry -> entry.getValue().stream().allMatch(detail -> ProjectExecutionBudgetDetail.isDirectSettlementCostType(detail.getCostType())))
+				.map(Map.Entry::getKey)
+				.collect(Collectors.toSet());
+
 		BigDecimal unpurchasedBudgetAmount = rolledUpExecutionBudgetItems.isEmpty()
 				? budgets.stream()
 						.filter(budget -> !purchasedBudgetIds.contains(budget.getBudgetId()))
@@ -394,6 +404,14 @@ public class ProjectService {
 						.filter(item -> !purchasedBudgetIds.contains(ProjectExecutionBudgetItem.budgetItemId(projectId, item.getItemId())))
 						.map(item -> currentRolledUpExecutionBudgetAmount(projectId, item, rolledUpBudgetChanges))
 						.reduce(BigDecimal.ZERO, BigDecimal::add);
+		BigDecimal unexecutedDirectSettlementAmount = rolledUpExecutionBudgetItems.isEmpty()
+				? BigDecimal.ZERO
+				: rolledUpExecutionBudgetItems.stream()
+						.filter(item -> !purchasedBudgetIds.contains(ProjectExecutionBudgetItem.budgetItemId(projectId, item.getItemId())))
+						.filter(item -> directSettlementOnlyBudgetItemIds.contains(ProjectExecutionBudgetItem.budgetItemId(projectId, item.getItemId())))
+						.map(item -> currentRolledUpExecutionBudgetAmount(projectId, item, rolledUpBudgetChanges))
+						.reduce(BigDecimal.ZERO, BigDecimal::add);
+		BigDecimal unpurchasedProcurementBudgetAmount = unpurchasedBudgetAmount.subtract(unexecutedDirectSettlementAmount);
 
 		BigDecimal expectedFinalCost = currentPurchaseAmount.add(unpurchasedBudgetAmount);
 		BigDecimal expectedProfit = currentContractAmount.subtract(expectedFinalCost);
@@ -454,6 +472,8 @@ public class ProjectService {
 				new ProfitAndBalance(
 						targetCostLimit,
 						unpurchasedBudgetAmount,
+						unpurchasedProcurementBudgetAmount,
+						unexecutedDirectSettlementAmount,
 						expectedFinalCost,
 						expectedProfit,
 						expectedProfitRate,

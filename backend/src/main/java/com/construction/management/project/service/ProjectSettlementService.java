@@ -113,13 +113,19 @@ public class ProjectSettlementService {
 		Project project = getProject(projectId);
 		ProjectRevision revision = currentRevision(projectId);
 		ProjectSettlement settlement = settlementRepository.findByProjectIdAndRevisionId(projectId, revision == null ? null : revision.getRevisionId()).orElse(null);
-		BigDecimal approvedSiteExpense = approvedSiteExpense(projectId, revision);
-		BigDecimal settlementExpense = settlement == null ? approvedSiteExpense : settlement.getSettlementExpense();
+		BigDecimal approvedSiteExpenseAmount = approvedDirectSettlementAmount(projectId, revision, "현장경비");
+		BigDecimal approvedLaborExpenseAmount = approvedDirectSettlementAmount(projectId, revision, "인건비");
+		BigDecimal settlementSiteExpense = settlement == null ? approvedSiteExpenseAmount : settlement.getSettlementSiteExpense();
+		BigDecimal settlementLaborExpense = settlement == null ? approvedLaborExpenseAmount : settlement.getSettlementLaborExpense();
+		if (settlement != null && settlementSiteExpense.add(settlementLaborExpense).signum() == 0 && defaultZero(settlement.getSettlementExpense()).signum() != 0) {
+			settlementSiteExpense = settlement.getSettlementExpense();
+		}
+		BigDecimal settlementExpense = settlementSiteExpense.add(settlementLaborExpense);
 		BigDecimal settlementTax = settlement == null ? BigDecimal.ZERO : settlement.getSettlementTax();
 		ProjectSettlementSnapshot snapshot = settlement == null
 				? calculate(projectId, revision, BigDecimal.ZERO, BigDecimal.ZERO)
 				: settlement.snapshot();
-		return toResponse(project, revision, snapshot, settlement, settlement == null ? BigDecimal.ZERO : settlement.getUncollectedReceivable(), settlementExpense, settlementTax, approvedSiteExpense(projectId, revision));
+		return toResponse(project, revision, snapshot, settlement, settlement == null ? BigDecimal.ZERO : settlement.getUncollectedReceivable(), settlementExpense, settlementSiteExpense, approvedSiteExpenseAmount, settlementLaborExpense, approvedLaborExpenseAmount, settlementTax);
 	}
 
 	@Transactional
@@ -133,9 +139,16 @@ public class ProjectSettlementService {
 			throw new IllegalStateException("이미 결재 대기 중인 준공정산 요청이 있습니다.");
 		}
 		BigDecimal uncollectedReceivable = defaultZero(request.uncollectedReceivable());
-		BigDecimal settlementExpense = defaultZero(request.settlementExpense());
+		boolean separateDirectSettlementExpensesProvided = request.settlementSiteExpense() != null || request.settlementLaborExpense() != null;
+		BigDecimal settlementSiteExpense = separateDirectSettlementExpensesProvided
+				? defaultZero(request.settlementSiteExpense())
+				: defaultZero(request.settlementExpense());
+		BigDecimal settlementLaborExpense = separateDirectSettlementExpensesProvided
+				? defaultZero(request.settlementLaborExpense())
+				: BigDecimal.ZERO;
+		BigDecimal settlementExpense = settlementSiteExpense.add(settlementLaborExpense);
 		BigDecimal settlementTax = defaultZero(request.settlementTax());
-		if (settlementExpense.signum() < 0 || settlementTax.signum() < 0) {
+		if (settlementSiteExpense.signum() < 0 || settlementLaborExpense.signum() < 0 || settlementTax.signum() < 0) {
 			throw new IllegalArgumentException("준공정산 경비와 세금은 0원 이상이어야 합니다.");
 		}
 		ProjectSettlementSnapshot snapshot = calculate(projectId, revision, settlementExpense, settlementTax);
@@ -154,7 +167,8 @@ public class ProjectSettlementService {
 		settlement.requestApproval(
 				snapshot,
 				uncollectedReceivable,
-				settlementExpense,
+				settlementSiteExpense,
+				settlementLaborExpense,
 				settlementTax,
 				request.settlementNotes(),
 				request.unpaidHandlingReason()
@@ -167,7 +181,9 @@ public class ProjectSettlementService {
 		));
 		project.changeStatus(ProjectStatus.정산중);
 		projectRepository.save(project);
-		return toResponse(project, revision, snapshot, settlement, uncollectedReceivable, settlementExpense, settlementTax, approvedSiteExpense(projectId, revision));
+		BigDecimal approvedSiteExpenseAmount = approvedDirectSettlementAmount(projectId, revision, "현장경비");
+		BigDecimal approvedLaborExpenseAmount = approvedDirectSettlementAmount(projectId, revision, "인건비");
+		return toResponse(project, revision, snapshot, settlement, uncollectedReceivable, settlementExpense, settlementSiteExpense, approvedSiteExpenseAmount, settlementLaborExpense, approvedLaborExpenseAmount, settlementTax);
 	}
 
 	@Transactional
@@ -275,7 +291,7 @@ public class ProjectSettlementService {
 		);
 	}
 
-	private ProjectSettlementResponse toResponse(Project project, ProjectRevision revision, ProjectSettlementSnapshot snapshot, ProjectSettlement settlement, BigDecimal uncollectedReceivable, BigDecimal settlementExpense, BigDecimal settlementTax, BigDecimal approvedSiteExpense) {
+	private ProjectSettlementResponse toResponse(Project project, ProjectRevision revision, ProjectSettlementSnapshot snapshot, ProjectSettlement settlement, BigDecimal uncollectedReceivable, BigDecimal settlementExpense, BigDecimal settlementSiteExpense, BigDecimal approvedSiteExpenseAmount, BigDecimal settlementLaborExpense, BigDecimal approvedLaborExpenseAmount, BigDecimal settlementTax) {
 		return new ProjectSettlementResponse(
 				project.getProjectId(),
 				project.getProjectCode(),
@@ -285,7 +301,11 @@ public class ProjectSettlementService {
 				new AmountSummary(snapshot.initialBudgetAmount(), snapshot.changeBudgetAmount(), snapshot.finalBudgetAmount()),
 				new AmountSummary(snapshot.initialPoAmount(), snapshot.changePoAmount(), snapshot.finalPoAmount()),
 				settlementExpense,
-				approvedSiteExpense,
+				settlementSiteExpense,
+				approvedSiteExpenseAmount,
+				settlementLaborExpense,
+				approvedLaborExpenseAmount,
+				approvedSiteExpenseAmount.add(approvedLaborExpenseAmount),
 				settlementTax,
 				new PaymentSummary(snapshot.approvedClaimsTotal(), snapshot.actualPaidTotal(), snapshot.unpaidBalance(), defaultZero(uncollectedReceivable)),
 				new Profitability(snapshot.finalCost(), snapshot.finalProfit(), snapshot.profitMarginRate()),
@@ -341,10 +361,14 @@ public class ProjectSettlementService {
 		return new AmountBreakdown(initialAmount, changeAmount, initialAmount.add(changeAmount));
 	}
 
-	private BigDecimal approvedSiteExpense(String projectId, ProjectRevision revision) {
+	private BigDecimal approvedDirectSettlementAmount(String projectId, ProjectRevision revision, String costType) {
 		if (revision != null) {
 			return budget(revision.getBudgetSnapshot()).details().stream()
-					.filter(detail -> "현장경비".equals(detail.costType()))
+					.collect(Collectors.groupingBy(BudgetDetail::budgetItemId))
+					.values().stream()
+					.filter(details -> !details.isEmpty() && details.stream().allMatch(detail -> ProjectExecutionBudgetDetail.isDirectSettlementCostType(detail.costType())))
+					.flatMap(List::stream)
+					.filter(detail -> costType.equals(detail.costType()))
 					.map(this::budgetAmount)
 					.reduce(BigDecimal.ZERO, BigDecimal::add);
 		}
@@ -355,8 +379,12 @@ public class ProjectSettlementService {
 						(left, right) -> left
 				));
 		return executionBudgetDetailRepository.findByProjectIdOrderByBudgetItemIdAscDetailIdAsc(projectId).stream()
-				.filter(detail -> "현장경비".equals(detail.getCostType()))
-				.filter(detail -> approvedByBudgetItem.getOrDefault(detail.getBudgetItemId(), false))
+				.collect(Collectors.groupingBy(ProjectExecutionBudgetDetail::getBudgetItemId))
+				.entrySet().stream()
+				.filter(entry -> approvedByBudgetItem.getOrDefault(entry.getKey(), false))
+				.filter(entry -> !entry.getValue().isEmpty() && entry.getValue().stream().allMatch(detail -> ProjectExecutionBudgetDetail.isDirectSettlementCostType(detail.getCostType())))
+				.flatMap(entry -> entry.getValue().stream())
+				.filter(detail -> costType.equals(detail.getCostType()))
 				.map(ProjectExecutionBudgetDetail::getAmount)
 				.map(ProjectSettlementService::defaultZero)
 				.reduce(BigDecimal.ZERO, BigDecimal::add);

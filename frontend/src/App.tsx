@@ -101,7 +101,7 @@ function App() {
   const [selectedPoId, setSelectedPoId] = useState('')
   const [claimForm, setClaimForm] = useState({ degree: '1', claim_amount: '0' })
   const [selectedPaymentPoIds, setSelectedPaymentPoIds] = useState<string[]>([])
-  const [settlementForm, setSettlementForm] = useState({ uncollected_receivable: '0', settlement_expense: '0', settlement_tax: '0', settlement_notes: '', force_complete_if_unpaid: false, unpaid_handling_reason: '' })
+  const [settlementForm, setSettlementForm] = useState({ uncollected_receivable: '0', settlement_site_expense: '0', settlement_labor_expense: '0', settlement_tax: '0', settlement_notes: '', force_complete_if_unpaid: false, unpaid_handling_reason: '' })
   const [targetProfitRate, setTargetProfitRate] = useState('0')
   const [selectedFileType, setSelectedFileType] = useState('CONTRACT')
   const [activeTab, setActiveTab] = useState(tabs[0])
@@ -683,7 +683,8 @@ function App() {
       setSettlementForm((form) => ({
         ...form,
         uncollected_receivable: String(data.payments.uncollected_receivable ?? 0),
-        settlement_expense: String(data.settlement_expense ?? 0),
+        settlement_site_expense: String(data.settlement_site_expense ?? 0),
+        settlement_labor_expense: String(data.settlement_labor_expense ?? 0),
         settlement_tax: String(data.settlement_tax ?? 0),
         settlement_notes: data.settlement_notes ?? form.settlement_notes,
         unpaid_handling_reason: data.unpaid_handling_reason ?? form.unpaid_handling_reason,
@@ -698,7 +699,8 @@ function App() {
     if (!selectedProjectId) return
     const response = await settlementApi.requestApproval(selectedProjectId, {
       uncollected_receivable: toNumber(settlementForm.uncollected_receivable),
-      settlement_expense: toNumber(settlementForm.settlement_expense),
+      settlement_site_expense: toNumber(settlementForm.settlement_site_expense),
+      settlement_labor_expense: toNumber(settlementForm.settlement_labor_expense),
       settlement_tax: toNumber(settlementForm.settlement_tax),
       settlement_notes: settlementForm.settlement_notes,
       force_complete_if_unpaid: settlementForm.force_complete_if_unpaid,
@@ -807,24 +809,27 @@ function App() {
   )
 
   const executionSummary = useMemo(() => {
+    const directSettlementCostTypes = new Set(['현장경비', '인건비'])
     const summary = new Map<string, ExecutionBudgetSummaryItem>()
     executionDetails.forEach((detail) => {
+      const requiresProcurement = !directSettlementCostTypes.has(detail.cost_type)
       const current = summary.get(detail.budget_item_id) ?? {
         budget_item_id: detail.budget_item_id,
         category_name: detail.category_name,
         item_name: detail.item_name,
-		approval_status: executionBudget?.approval_status ?? 'DRAFT',
-		purchase_order_status: 'NOT_REQUESTED',
-		procurement_required: detail.cost_type !== '현장경비',
-		rolled_up_amount: 0,
+        approval_status: executionBudget?.approval_status ?? 'DRAFT',
+        purchase_order_status: 'NOT_REQUESTED',
+        procurement_required: requiresProcurement,
+        rolled_up_amount: 0,
       }
       current.category_name = detail.category_name
       current.item_name = detail.item_name
+      current.procurement_required ||= requiresProcurement
       current.rolled_up_amount += (detail.quantity || 0) * (detail.unit_price || 0)
       summary.set(detail.budget_item_id, current)
     })
     return [...summary.values()].sort((a, b) => a.budget_item_id.localeCompare(b.budget_item_id))
-	}, [executionBudget?.approval_status, executionDetails])
+  }, [executionBudget?.approval_status, executionDetails])
 
   return (
     <main className="min-h-screen bg-[#f5f7fb] text-slate-900">

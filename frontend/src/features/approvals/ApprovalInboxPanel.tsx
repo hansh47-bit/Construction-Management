@@ -45,7 +45,9 @@ function ApprovalDocument({ approval }: { approval: ApprovalItem }) {
           <div className="rounded border border-slate-200 bg-white p-2"><p className="text-xs text-slate-500">최종 계약금액</p><strong>{formatWon(detail.final_contract_amount)}</strong></div>
           <div className="rounded border border-slate-200 bg-white p-2"><p className="text-xs text-slate-500">최종 실행예산</p><strong>{formatWon(detail.final_execution_budget)}</strong></div>
           <div className="rounded border border-slate-200 bg-white p-2"><p className="text-xs text-slate-500">최종 발주금액</p><strong>{formatWon(detail.final_purchase_order_amount)}</strong></div>
-          <div className="rounded border border-slate-200 bg-white p-2"><p className="text-xs text-slate-500">준공경비·세금</p><strong>{formatWon(detail.settlement_expense + detail.settlement_tax)}</strong></div>
+			<div className="rounded border border-slate-200 bg-white p-2"><p className="text-xs text-slate-500">현장경비</p><strong>{formatWon(detail.settlement_site_expense)}</strong></div>
+			<div className="rounded border border-slate-200 bg-white p-2"><p className="text-xs text-slate-500">인건비</p><strong>{formatWon(detail.settlement_labor_expense)}</strong></div>
+			<div className="rounded border border-slate-200 bg-white p-2"><p className="text-xs text-slate-500">준공 세금</p><strong>{formatWon(detail.settlement_tax)}</strong></div>
           <div className="rounded border border-slate-200 bg-white p-2"><p className="text-xs text-slate-500">최종 원가</p><strong>{formatWon(detail.final_cost)}</strong></div>
           <div className="rounded border border-cyan-200 bg-cyan-50 p-2"><p className="text-xs text-cyan-800">최종 이익 · 이익률</p><strong>{formatWon(detail.final_profit)} · {detail.profit_margin_rate.toFixed(2)}%</strong></div>
           <div className={`col-span-2 rounded border p-2 ${detail.unpaid_balance > 0 ? 'border-amber-300 bg-amber-50' : 'border-emerald-300 bg-emerald-50'}`}><p className="text-xs text-slate-500">미지급 잔액</p><strong>{formatWon(detail.unpaid_balance)}</strong></div>

@@ -20,8 +20,16 @@ public record ProjectSettlementResponse(
 		AmountSummary purchaseOrders,
 		@JsonProperty("settlement_expense")
 		BigDecimal settlementExpense,
-		@JsonProperty("approved_site_expense")
-		BigDecimal approvedSiteExpense,
+		@JsonProperty("settlement_site_expense")
+		BigDecimal settlementSiteExpense,
+		@JsonProperty("approved_site_expense_amount")
+		BigDecimal approvedSiteExpenseAmount,
+		@JsonProperty("settlement_labor_expense")
+		BigDecimal settlementLaborExpense,
+		@JsonProperty("approved_labor_expense_amount")
+		BigDecimal approvedLaborExpenseAmount,
+		@JsonProperty("approved_direct_settlement_amount")
+		BigDecimal approvedDirectSettlementAmount,
 		@JsonProperty("settlement_tax")
 		BigDecimal settlementTax,
 		PaymentSummary payments,

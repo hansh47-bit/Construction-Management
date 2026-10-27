@@ -65,6 +65,12 @@ public class ProjectSettlement {
 	@Column(name = "settlement_expense", nullable = false, precision = 18, scale = 2)
 	private BigDecimal settlementExpense = BigDecimal.ZERO;
 
+	@Column(name = "settlement_site_expense", nullable = false, precision = 18, scale = 2, columnDefinition = "decimal(18,2) default 0")
+	private BigDecimal settlementSiteExpense = BigDecimal.ZERO;
+
+	@Column(name = "settlement_labor_expense", nullable = false, precision = 18, scale = 2, columnDefinition = "decimal(18,2) default 0")
+	private BigDecimal settlementLaborExpense = BigDecimal.ZERO;
+
 	@Column(name = "settlement_tax", nullable = false, precision = 18, scale = 2)
 	private BigDecimal settlementTax = BigDecimal.ZERO;
 
@@ -116,7 +122,8 @@ public class ProjectSettlement {
 	public ProjectSettlement requestApproval(
 			ProjectSettlementSnapshot snapshot,
 			BigDecimal uncollectedReceivable,
-			BigDecimal settlementExpense,
+			BigDecimal settlementSiteExpense,
+			BigDecimal settlementLaborExpense,
 			BigDecimal settlementTax,
 			String settlementNotes,
 			String unpaidHandlingReason
@@ -134,7 +141,9 @@ public class ProjectSettlement {
 		this.actualPaidTotal = snapshot.actualPaidTotal();
 		this.unpaidBalance = snapshot.unpaidBalance();
 		this.uncollectedReceivable = uncollectedReceivable == null ? BigDecimal.ZERO : uncollectedReceivable;
-		this.settlementExpense = settlementExpense == null ? BigDecimal.ZERO : settlementExpense;
+		this.settlementSiteExpense = settlementSiteExpense == null ? BigDecimal.ZERO : settlementSiteExpense;
+		this.settlementLaborExpense = settlementLaborExpense == null ? BigDecimal.ZERO : settlementLaborExpense;
+		this.settlementExpense = this.settlementSiteExpense.add(this.settlementLaborExpense);
 		this.settlementTax = settlementTax == null ? BigDecimal.ZERO : settlementTax;
 		this.finalCost = snapshot.finalCost();
 		this.finalProfit = snapshot.finalProfit();
@@ -185,6 +194,8 @@ public class ProjectSettlement {
 	}
 
 	public BigDecimal getSettlementExpense() { return settlementExpense; }
+	public BigDecimal getSettlementSiteExpense() { return settlementSiteExpense == null ? BigDecimal.ZERO : settlementSiteExpense; }
+	public BigDecimal getSettlementLaborExpense() { return settlementLaborExpense == null ? BigDecimal.ZERO : settlementLaborExpense; }
 	public BigDecimal getSettlementTax() { return settlementTax; }
 
 	public String getSettlementStatus() {

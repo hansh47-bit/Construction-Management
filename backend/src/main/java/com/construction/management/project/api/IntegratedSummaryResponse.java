@@ -54,6 +54,10 @@ public record IntegratedSummaryResponse(
 			BigDecimal targetCostLimit,
 			@JsonProperty("unpurchased_budget_amount")
 			BigDecimal unpurchasedBudgetAmount,
+			@JsonProperty("unpurchased_procurement_budget_amount")
+			BigDecimal unpurchasedProcurementBudgetAmount,
+			@JsonProperty("unexecuted_direct_settlement_amount")
+			BigDecimal unexecutedDirectSettlementAmount,
 			@JsonProperty("expected_final_cost")
 			BigDecimal expectedFinalCost,
 			@JsonProperty("expected_profit")
