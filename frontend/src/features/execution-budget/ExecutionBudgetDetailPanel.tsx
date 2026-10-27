@@ -41,8 +41,10 @@ export function ExecutionBudgetDetailPanel({
   const safeCurrentPage = Math.min(currentPage, pageCount)
   const pageStart = (safeCurrentPage - 1) * pageSize
   const pagedDetails = details.slice(pageStart, pageStart + pageSize)
-  const isLocked = executionBudget.approval_status === 'REQUESTED' || executionBudget.approval_status === 'APPROVED'
-  const displayedBudgetAmount = executionBudget.approval_status === 'APPROVED' ? (executionBudget.approved_amount ?? totalAmount) : totalAmount
+  const isLocked = executionBudget.approval_status === 'REQUESTED' || (executionBudget.approval_status === 'APPROVED' && !executionBudget.execution_budget_rewrite_available)
+  // 상단 지표와 표 하단 합계는 모두 현재 표시 중인 상세 행의 수량 × 단가 합계를 사용한다.
+  // 승인 이력의 집계값은 변경 전 항목을 포함할 수 있어 상세 행 합계와 달라질 수 있다.
+  const displayedBudgetAmount = totalAmount
   const appliedRevisionLabel = executionBudget.applied_revision_number ? `${executionBudget.applied_revision_number}차 승인본` : '최초 승인본'
 
   return (
@@ -74,6 +76,12 @@ export function ExecutionBudgetDetailPanel({
           accent={executionBudget.over_target_limit || displayedBudgetAmount > executionBudget.target_cost_limit ? 'text-rose-700' : 'text-cyan-700'}
         />
       </div>
+
+      {executionBudget.execution_budget_rewrite_available && (
+        <div className="mt-4 rounded-md border border-cyan-200 bg-cyan-50 px-4 py-3 text-sm text-cyan-900">
+          승인된 계약 변경 차수 기준으로 세부실행예산을 다시 작성할 수 있습니다. 저장 후 실행예산 결재를 다시 요청하면 항목이 고정됩니다.
+        </div>
+      )}
 
       {contractFiles.length > 0 && (
         <div className="border-b border-slate-200 py-5">
@@ -110,7 +118,7 @@ export function ExecutionBudgetDetailPanel({
         <h3 className="text-sm font-semibold text-slate-900">실행항목ID별 자동 집계</h3>
         <div className="mt-3 overflow-x-auto">
           <table className="min-w-full text-left text-sm">
-            <thead className="bg-slate-50 text-xs font-semibold uppercase text-slate-500">
+            <thead className="whitespace-nowrap bg-slate-50 text-xs font-semibold uppercase text-slate-500">
               <tr>
                 <th className="px-3 py-3">실행항목ID</th>
                 <th className="px-3 py-3">공종</th>
@@ -145,22 +153,18 @@ export function ExecutionBudgetDetailPanel({
           {details.length > 0 ? `${pageStart + 1}-${Math.min(pageStart + pageSize, details.length)} / ${details.length}` : '0 / 0'}
         </div>
         <div className="overflow-x-auto">
-          <table className="min-w-[1640px] text-left text-sm">
-            <thead className="bg-slate-50 text-xs font-semibold uppercase text-slate-500">
+          <table className="min-w-[1170px] text-left text-sm">
+            <thead className="whitespace-nowrap bg-slate-50 text-xs font-semibold uppercase text-slate-500">
               <tr>
 				<th className="px-3 py-3">순번</th>
-                <th className="px-3 py-3">No</th>
                 <th className="px-3 py-3">프로젝트</th>
                 <th className="px-3 py-3">실행항목ID</th>
                 <th className="px-3 py-3">공종</th>
-                <th className="px-3 py-3">실행항목</th>
                 <th className="px-3 py-3">원가구분</th>
-                <th className="px-3 py-3">업체/내용</th>
                 <th className="px-3 py-3">규격/단위</th>
                 <th className="px-3 py-3">수량</th>
                 <th className="px-3 py-3">단가</th>
                 <th className="px-3 py-3">금액</th>
-                <th className="px-3 py-3">증빙링크</th>
                 <th className="px-3 py-3">비고</th>
                 <th className="px-3 py-3"></th>
               </tr>
@@ -173,46 +177,37 @@ export function ExecutionBudgetDetailPanel({
                   <td className="px-3 py-3 text-center font-semibold text-slate-500">{index + 1}</td>
                   <td className="px-3 py-3 text-slate-600">{executionBudget.project_code}</td>
                   <td className="px-3 py-3">
-                    <input value={detail.budget_item_id} onChange={(event) => updateExecutionDetail(index, 'budget_item_id', event.target.value)} className="input" />
+                    <input disabled={isLocked} value={detail.budget_item_id} onChange={(event) => updateExecutionDetail(index, 'budget_item_id', event.target.value)} className="input !w-40 disabled:cursor-not-allowed disabled:bg-slate-100" />
                   </td>
                   <td className="px-3 py-3">
-                    <input value={detail.category_name} onChange={(event) => updateExecutionDetail(index, 'category_name', event.target.value)} className="input" />
+                    <input disabled={isLocked} value={detail.category_name} onChange={(event) => updateExecutionDetail(index, 'category_name', event.target.value)} className="input !w-64 disabled:cursor-not-allowed disabled:bg-slate-100" />
                   </td>
                   <td className="px-3 py-3">
-                    <input value={detail.item_name} onChange={(event) => updateExecutionDetail(index, 'item_name', event.target.value)} className="input" />
-                  </td>
-                  <td className="px-3 py-3">
-                    <select value={detail.cost_type} onChange={(event) => updateExecutionDetail(index, 'cost_type', event.target.value)} className="input">
+                    <select disabled={isLocked} value={detail.cost_type} onChange={(event) => updateExecutionDetail(index, 'cost_type', event.target.value)} className="input !w-36 disabled:cursor-not-allowed disabled:bg-slate-100">
                       {costTypes.map((type) => (
                         <option key={type} value={type}>{type}</option>
                       ))}
                     </select>
                   </td>
                   <td className="px-3 py-3">
-                    <input value={detail.vendor_description ?? ''} onChange={(event) => updateExecutionDetail(index, 'vendor_description', event.target.value)} className="input" />
+                    <input disabled={isLocked} value={detail.unit ?? ''} onChange={(event) => updateExecutionDetail(index, 'unit', event.target.value)} className="input w-24 disabled:cursor-not-allowed disabled:bg-slate-100" placeholder="예: EA" />
                   </td>
                   <td className="px-3 py-3">
-                    <input value={detail.unit ?? ''} onChange={(event) => updateExecutionDetail(index, 'unit', event.target.value)} className="input" />
+                    <input disabled={isLocked} type="number" min="0" step="any" value={detail.quantity} onChange={(event) => updateExecutionDetail(index, 'quantity', event.target.value)} inputMode="decimal" className="input !w-32 disabled:cursor-not-allowed disabled:bg-slate-100" />
                   </td>
                   <td className="px-3 py-3">
-                    <input value={detail.quantity} onChange={(event) => updateExecutionDetail(index, 'quantity', event.target.value)} inputMode="decimal" className="input" />
-                  </td>
-                  <td className="px-3 py-3">
-                    <MoneyInput value={detail.unit_price} onChange={(value) => updateExecutionDetail(index, 'unit_price', value)} />
+                    <MoneyInput disabled={isLocked} value={detail.unit_price} onChange={(value) => updateExecutionDetail(index, 'unit_price', value)} suffix="" className="w-36" />
                   </td>
                   <td className="px-3 py-3 font-semibold text-slate-900">{formatWon((detail.quantity || 0) * (detail.unit_price || 0))}</td>
                   <td className="px-3 py-3">
-                    <input value={detail.evidence_link ?? ''} onChange={(event) => updateExecutionDetail(index, 'evidence_link', event.target.value)} className="input" />
-                  </td>
-                  <td className="px-3 py-3">
-                    <input value={detail.note ?? ''} onChange={(event) => updateExecutionDetail(index, 'note', event.target.value)} className="input" />
+                    <input disabled={isLocked} value={detail.note ?? ''} onChange={(event) => updateExecutionDetail(index, 'note', event.target.value)} className="input !w-56 disabled:cursor-not-allowed disabled:bg-slate-100" />
                   </td>
                   <td className="px-3 py-3">
                     <div className="flex gap-1">
-                      <button type="button" onClick={() => addExecutionDetail(index)} className="rounded-md p-2 text-slate-500 hover:bg-cyan-50 hover:text-cyan-700" aria-label="행 복사">
+                      <button type="button" disabled={isLocked} onClick={() => addExecutionDetail(index)} className="rounded-md p-2 text-slate-500 hover:bg-cyan-50 hover:text-cyan-700 disabled:cursor-not-allowed disabled:opacity-40" aria-label="행 복사">
                         <Plus className="h-4 w-4" aria-hidden="true" />
                       </button>
-                      <button type="button" onClick={() => removeExecutionDetail(index)} className="rounded-md p-2 text-slate-500 hover:bg-rose-50 hover:text-rose-700" aria-label="행 삭제">
+                      <button type="button" disabled={isLocked} onClick={() => removeExecutionDetail(index)} className="rounded-md p-2 text-slate-500 hover:bg-rose-50 hover:text-rose-700 disabled:cursor-not-allowed disabled:opacity-40" aria-label="행 삭제">
                         <Trash2 className="h-4 w-4" aria-hidden="true" />
                       </button>
                     </div>
@@ -221,9 +216,9 @@ export function ExecutionBudgetDetailPanel({
                 )
               })}
               <tr className="bg-slate-50 font-semibold text-slate-900">
-                <td className="px-3 py-3" colSpan={10}>합계</td>
+                <td className="px-3 py-3" colSpan={8}>합계</td>
                 <td className="px-3 py-3">{formatWon(totalAmount)}</td>
-                <td className="px-3 py-3" colSpan={3}></td>
+                <td className="px-3 py-3" colSpan={2}></td>
               </tr>
             </tbody>
           </table>
@@ -286,7 +281,8 @@ export function ExecutionBudgetDetailPanel({
         <button
           type="button"
           onClick={() => addExecutionDetail()}
-          className="mt-4 inline-flex items-center gap-2 rounded-md border border-slate-300 px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50"
+          disabled={isLocked}
+          className="mt-4 inline-flex items-center gap-2 rounded-md border border-slate-300 px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-40"
         >
           <Plus className="h-4 w-4" aria-hidden="true" />
           행 추가

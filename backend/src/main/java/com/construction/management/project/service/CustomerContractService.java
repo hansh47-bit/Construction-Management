@@ -4,6 +4,7 @@ import com.construction.management.project.api.CustomerContractRequest;
 import com.construction.management.project.api.CustomerContractResponse;
 import com.construction.management.project.api.CustomerContractResponse.FileResponse;
 import com.construction.management.project.api.CustomerContractResponse.Item;
+import com.construction.management.project.api.ProjectRevisionResponse;
 import com.construction.management.project.domain.ContractFile;
 import com.construction.management.project.domain.ContractChange;
 import com.construction.management.project.domain.ApprovalStatus;
@@ -37,6 +38,7 @@ public class CustomerContractService {
 	private final CustomerContractItemRepository itemRepository;
 	private final ContractFileRepository fileRepository;
 	private final ContractChangeRepository contractChangeRepository;
+	private final ProjectRevisionService projectRevisionService;
 	private final Path uploadRoot;
 
 	public CustomerContractService(
@@ -44,12 +46,14 @@ public class CustomerContractService {
 			CustomerContractItemRepository itemRepository,
 			ContractFileRepository fileRepository,
 			ContractChangeRepository contractChangeRepository,
+			ProjectRevisionService projectRevisionService,
 			@Value("${app.contract-file.upload-dir:uploads/contracts}") String uploadDir
 	) {
 		this.projectRepository = projectRepository;
 		this.itemRepository = itemRepository;
 		this.fileRepository = fileRepository;
 		this.contractChangeRepository = contractChangeRepository;
+		this.projectRevisionService = projectRevisionService;
 		this.uploadRoot = Path.of(uploadDir).toAbsolutePath().normalize();
 	}
 
@@ -190,10 +194,15 @@ public class CustomerContractService {
 		BigDecimal totalWithVat = totalSupply.add(totalVat);
 		BigDecimal approvedChanges = contractChangeRepository.findByProjectIdAndApprovalStatus(project.getProjectId(), ApprovalStatus.APPROVED).stream()
 				.map(ContractChange::getChangeAmount).map(CustomerContractService::defaultZero).reduce(BigDecimal.ZERO, BigDecimal::add);
-		BigDecimal currentSupply = totalSupply.add(approvedChanges);
-		BigDecimal currentWithVat = totalWithVat.add(approvedChanges);
+		ProjectRevisionResponse approvedRevision = projectRevisionService.latestApprovedRevision(project.getProjectId()).orElse(null);
+		BigDecimal currentSupply = approvedRevision == null ? totalSupply.add(approvedChanges) : approvedRevision.contractTotal();
+		BigDecimal currentVat = approvedRevision == null
+				? totalVat
+				: approvedRevision.contractItems().stream().map(ProjectRevisionResponse.ContractItem::vatAmount).map(CustomerContractService::defaultZero).reduce(BigDecimal.ZERO, BigDecimal::add);
+		BigDecimal currentWithVat = currentSupply.add(currentVat);
+		BigDecimal currentTargetProfitRate = approvedRevision == null ? project.getTargetProfitRate() : approvedRevision.targetProfitRate();
 		BigDecimal targetCostLimit = currentSupply
-				.multiply(BigDecimal.ONE.subtract(defaultZero(project.getTargetProfitRate()).divide(BigDecimal.valueOf(100), 6, RoundingMode.HALF_UP)))
+				.multiply(BigDecimal.ONE.subtract(defaultZero(currentTargetProfitRate).divide(BigDecimal.valueOf(100), 6, RoundingMode.HALF_UP)))
 				.setScale(0, RoundingMode.HALF_UP);
 
 		return new CustomerContractResponse(
@@ -201,7 +210,7 @@ public class CustomerContractService {
 				project.getProjectCode(),
 				project.getProjectName(),
 				project.getClientName(),
-				project.getTargetProfitRate(),
+				currentTargetProfitRate,
 				totalSupply,
 				currentSupply,
 				totalVat,

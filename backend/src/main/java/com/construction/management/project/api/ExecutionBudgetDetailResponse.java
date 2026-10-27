@@ -21,6 +21,8 @@ public record ExecutionBudgetDetailResponse(
 		String approvalId,
 		@JsonProperty("approval_comment")
 		String approvalComment,
+		@JsonProperty("execution_budget_rewrite_available")
+		boolean executionBudgetRewriteAvailable,
 		@JsonProperty("applied_revision_number")
 		Integer appliedRevisionNumber,
 		@JsonProperty("approved_amount")
@@ -44,6 +46,8 @@ public record ExecutionBudgetDetailResponse(
 			String approvalStatus,
 			@JsonProperty("purchase_order_status")
 			String purchaseOrderStatus,
+			@JsonProperty("procurement_required")
+			boolean procurementRequired,
 			@JsonProperty("rolled_up_amount")
 			BigDecimal rolledUpAmount
 	) {

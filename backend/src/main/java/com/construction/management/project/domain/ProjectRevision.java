@@ -31,6 +31,9 @@ public class ProjectRevision {
 	@Column(name = "status", nullable = false, length = 32)
 	private String status = "DRAFT";
 
+	@Column(name = "execution_budget_rewrite_available", nullable = false)
+	private boolean executionBudgetRewriteAvailable;
+
 	@Lob
 	@Column(name = "base_contract_snapshot", nullable = false)
 	private String baseContractSnapshot;
@@ -99,6 +102,7 @@ public class ProjectRevision {
 	public String getTitle() { return title; }
 	public String getReason() { return reason; }
 	public String getStatus() { return status; }
+	public boolean isExecutionBudgetRewriteAvailable() { return executionBudgetRewriteAvailable; }
 	public String getBaseContractSnapshot() { return baseContractSnapshot; }
 	public String getContractSnapshot() { return contractSnapshot; }
 	public String getBaseBudgetSnapshot() { return baseBudgetSnapshot; }
@@ -121,6 +125,18 @@ public class ProjectRevision {
 
 	public void approve() {
 		this.status = "APPROVED";
+	}
+
+	public void enableExecutionBudgetRewrite() {
+		this.executionBudgetRewriteAvailable = true;
+	}
+
+	public void consumeExecutionBudgetRewrite() {
+		this.executionBudgetRewriteAvailable = false;
+	}
+
+	public void replaceBudgetSnapshot(String budgetSnapshot) {
+		this.budgetSnapshot = budgetSnapshot;
 	}
 
 	public void reject() {

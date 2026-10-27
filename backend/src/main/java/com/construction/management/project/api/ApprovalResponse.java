@@ -144,4 +144,17 @@ public record ApprovalResponse(
 			@JsonProperty("approved_claim_total") BigDecimal approvedClaimTotal
 	) {
 	}
+
+	public record FinalSettlementDetail(
+			@JsonProperty("final_contract_amount") BigDecimal finalContractAmount,
+			@JsonProperty("final_execution_budget") BigDecimal finalExecutionBudget,
+			@JsonProperty("final_purchase_order_amount") BigDecimal finalPurchaseOrderAmount,
+			@JsonProperty("settlement_expense") BigDecimal settlementExpense,
+			@JsonProperty("settlement_tax") BigDecimal settlementTax,
+			@JsonProperty("unpaid_balance") BigDecimal unpaidBalance,
+			@JsonProperty("final_cost") BigDecimal finalCost,
+			@JsonProperty("final_profit") BigDecimal finalProfit,
+			@JsonProperty("profit_margin_rate") BigDecimal profitMarginRate
+	) {
+	}
 }

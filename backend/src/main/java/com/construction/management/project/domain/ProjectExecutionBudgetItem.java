@@ -142,6 +142,14 @@ public class ProjectExecutionBudgetItem {
 		this.approvalComment = comment;
 	}
 
+	public void resetForBudgetRewrite() {
+		this.approvalStatus = ApprovalStatus.DRAFT.name();
+		this.approvedBudgetAmount = null;
+		this.approvedAt = null;
+		this.approvalId = null;
+		this.approvalComment = null;
+	}
+
 	public boolean isApproved() {
 		return ApprovalStatus.APPROVED.name().equals(approvalStatus);
 	}

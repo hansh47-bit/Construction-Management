@@ -33,6 +33,7 @@ class CustomerContractServiceTest {
 		CustomerContractItemRepository itemRepository = mock(CustomerContractItemRepository.class);
 		ContractFileRepository fileRepository = mock(ContractFileRepository.class);
 		ContractChangeRepository contractChangeRepository = mock(ContractChangeRepository.class);
+		ProjectRevisionService projectRevisionService = mock(ProjectRevisionService.class);
 		Project project = new Project("project-1", "P-20261020-001", "테스트 프로젝트");
 
 		when(projectRepository.findById("project-1")).thenReturn(Optional.of(project));
@@ -40,12 +41,14 @@ class CustomerContractServiceTest {
 		when(fileRepository.findByProjectIdOrderByUploadedAtDesc("project-1")).thenReturn(List.of());
 		when(contractChangeRepository.findByProjectIdAndApprovalStatus(org.mockito.ArgumentMatchers.anyString(), org.mockito.ArgumentMatchers.any()))
 				.thenReturn(List.of());
+		when(projectRevisionService.latestApprovedRevision("project-1")).thenReturn(Optional.empty());
 
 		CustomerContractService service = new CustomerContractService(
 				projectRepository,
 				itemRepository,
 				fileRepository,
 				contractChangeRepository,
+				projectRevisionService,
 				uploadRoot.toString()
 		);
 
@@ -64,6 +67,7 @@ class CustomerContractServiceTest {
 		CustomerContractItemRepository itemRepository = mock(CustomerContractItemRepository.class);
 		ContractFileRepository fileRepository = mock(ContractFileRepository.class);
 		ContractChangeRepository contractChangeRepository = mock(ContractChangeRepository.class);
+		ProjectRevisionService projectRevisionService = mock(ProjectRevisionService.class);
 		Project project = mock(Project.class);
 		Path projectDirectory = Files.createDirectories(uploadRoot.resolve("project-1"));
 		Path storedFile = Files.writeString(projectDirectory.resolve("stored-contract.pdf"), "contract");
@@ -82,12 +86,14 @@ class CustomerContractServiceTest {
 		when(itemRepository.findByProjectIdOrderByWorkCategoryAsc("project-1")).thenReturn(List.of());
 		when(contractChangeRepository.findByProjectIdAndApprovalStatus(org.mockito.ArgumentMatchers.anyString(), org.mockito.ArgumentMatchers.any()))
 				.thenReturn(List.of());
+		when(projectRevisionService.latestApprovedRevision("project-1")).thenReturn(Optional.empty());
 
 		CustomerContractService service = new CustomerContractService(
 				projectRepository,
 				itemRepository,
 				fileRepository,
 				contractChangeRepository,
+				projectRevisionService,
 				uploadRoot.toString()
 		);
 

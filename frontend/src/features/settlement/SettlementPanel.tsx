@@ -8,25 +8,44 @@ export function SettlementPanel({
   settlement,
   form,
   setForm,
-  completeSettlement,
+  requestSettlementApproval,
 }: {
   settlement: ProjectSettlement
   form: { uncollected_receivable: string; settlement_expense: string; settlement_tax: string; settlement_notes: string; force_complete_if_unpaid: boolean; unpaid_handling_reason: string }
   setForm: (value: { uncollected_receivable: string; settlement_expense: string; settlement_tax: string; settlement_notes: string; force_complete_if_unpaid: boolean; unpaid_handling_reason: string }) => void
-  completeSettlement: () => void
+  requestSettlementApproval: () => void
 }) {
   const hasUnpaidBalance = settlement.payments.unpaid_balance > 0
+  const approvalPending = settlement.settlement_status === 'REQUESTED'
+  const editingDisabled = settlement.is_settled || approvalPending
   const settlementExpense = toNumber(form.settlement_expense)
   const settlementTax = toNumber(form.settlement_tax)
-  const previewFinalCost = settlement.is_settled
-    ? settlement.profitability.final_cost
-    : settlement.profitability.final_cost + settlementExpense + settlementTax
+  const snapshotIncludesSettlementInputs = settlement.settlement_status === 'REQUESTED' || settlement.settlement_status === 'REJECTED' || settlement.is_settled
+  const savedSettlementInputs = snapshotIncludesSettlementInputs ? settlement.settlement_expense + settlement.settlement_tax : 0
+  const previewFinalCost = settlement.profitability.final_cost - savedSettlementInputs + settlementExpense + settlementTax
   const previewFinalProfit = settlement.contract.final_amount - previewFinalCost
   const previewProfitMarginRate = settlement.contract.final_amount === 0 ? 0 : (previewFinalProfit / settlement.contract.final_amount) * 100
+  const revisionNumber = settlement.revision_number
+  const previousRevision = revisionNumber && revisionNumber > 1 ? `${revisionNumber - 1}차` : '최초'
   const sections = [
-    ['계약 및 매출 현황', settlement.contract, '최종 계약금액'],
-    ['실행예산 현황', settlement.execution_budget, '최종 실행예산'],
-    ['발주 및 집행 현황', settlement.purchase_orders, '최종 발주금액'],
+    {
+      title: '계약 및 매출 현황', amount: settlement.contract,
+      initialLabel: revisionNumber ? `${previousRevision} 승인 계약금액` : '최초 금액',
+      changeLabel: revisionNumber ? `${revisionNumber}차 계약 증감` : '변경 금액',
+      finalLabel: revisionNumber ? `${revisionNumber}차 승인 계약금액` : '최종 계약금액',
+    },
+    {
+      title: '실행예산 현황', amount: settlement.execution_budget,
+      initialLabel: revisionNumber ? `${previousRevision} 실행예산` : '최초 금액',
+      changeLabel: revisionNumber ? `${revisionNumber}차 실행예산 증감` : '변경 금액',
+      finalLabel: revisionNumber ? `${revisionNumber}차 승인 실행예산` : '최종 실행예산',
+    },
+    {
+      title: '발주 및 집행 현황', amount: settlement.purchase_orders,
+      initialLabel: revisionNumber ? `${revisionNumber}차 최초 발주금액` : '최초 금액',
+      changeLabel: revisionNumber ? `${revisionNumber}차 발주 증감` : '변경 금액',
+      finalLabel: revisionNumber ? `${revisionNumber}차 최종 발주금액` : '최종 발주금액',
+    },
   ] as const
 
   return (
@@ -42,21 +61,21 @@ export function SettlementPanel({
           <p className="mt-1 text-sm text-slate-500">계약, 실행예산, 발주, 기성, 지급 누계를 집계해 최종 손익과 마감 가능 여부를 확인합니다.</p>
         </div>
         <span className={`inline-flex w-fit items-center rounded-full px-3 py-1 text-xs font-semibold ${settlement.is_settled ? 'bg-emerald-100 text-emerald-800' : 'bg-amber-100 text-amber-800'}`}>
-          {settlement.is_settled ? '정산완료' : '작성중'}
+          {settlement.is_settled ? '정산완료' : approvalPending ? '최종 결재대기' : settlement.settlement_status === 'REJECTED' ? '결재반려' : '작성중'}
         </span>
       </div>
 
       <div className="grid gap-4 py-5 lg:grid-cols-3">
-        {sections.map(([title, amount, finalLabel]) => (
+        {sections.map(({ title, amount, initialLabel, changeLabel, finalLabel }) => (
           <article key={title} className="rounded-md border border-slate-200 bg-white p-4 shadow-sm">
             <h4 className="text-sm font-semibold text-slate-900">{title}</h4>
             <dl className="mt-4 space-y-3 text-sm">
               <div className="flex items-center justify-between gap-4">
-                <dt className="text-slate-500">최초 금액</dt>
+                <dt className="text-slate-500">{initialLabel}</dt>
                 <dd className="font-semibold text-slate-900">{formatWon(amount.initial_amount)}</dd>
               </div>
               <div className="flex items-center justify-between gap-4">
-                <dt className="text-slate-500">변경 금액</dt>
+                <dt className="text-slate-500">{changeLabel}</dt>
                 <dd className={varianceClass(amount.change_amount)}>{formatWon(amount.change_amount)}</dd>
               </div>
               <div className="flex items-center justify-between gap-4 border-t border-slate-100 pt-3">
@@ -86,18 +105,18 @@ export function SettlementPanel({
             </div>
             <div>
               <dt className="mb-2 text-slate-500">미수금</dt>
-              <dd><MoneyInput value={toNumber(form.uncollected_receivable)} onChange={(value) => setForm({ ...form, uncollected_receivable: value })} disabled={settlement.is_settled} /></dd>
+              <dd><MoneyInput value={toNumber(form.uncollected_receivable)} onChange={(value) => setForm({ ...form, uncollected_receivable: value })} disabled={editingDisabled} /></dd>
             </div>
             <div className="grid gap-3 border-t border-slate-100 pt-4 sm:grid-cols-2">
               <label className="block text-sm font-semibold text-slate-700">
                 준공 경비
-                <span className="mt-1 block text-xs font-normal text-slate-500">현장 경비, 운반비 등 발주 외 추가 비용</span>
-                <MoneyInput value={settlementExpense} onChange={(value) => setForm({ ...form, settlement_expense: value })} disabled={settlement.is_settled} className="mt-2" />
+                <span className="mt-1 block text-xs font-normal text-slate-500">승인된 현장경비 {formatWon(settlement.approved_site_expense)}이 기본 입력되며, 실제 집행액으로 수정할 수 있습니다.</span>
+                <MoneyInput value={settlementExpense} onChange={(value) => setForm({ ...form, settlement_expense: value })} disabled={editingDisabled} className="mt-2" />
               </label>
               <label className="block text-sm font-semibold text-slate-700">
                 준공 세금
                 <span className="mt-1 block text-xs font-normal text-slate-500">정산 시 비용 처리할 세금</span>
-                <MoneyInput value={settlementTax} onChange={(value) => setForm({ ...form, settlement_tax: value })} disabled={settlement.is_settled} className="mt-2" />
+                <MoneyInput value={settlementTax} onChange={(value) => setForm({ ...form, settlement_tax: value })} disabled={editingDisabled} className="mt-2" />
               </label>
             </div>
           </dl>
@@ -131,12 +150,17 @@ export function SettlementPanel({
       </div>
 
       <div className="border-t border-slate-200 py-5">
+        {approvalPending && (
+          <div className="mb-4 rounded-md border border-cyan-200 bg-cyan-50 p-3 text-sm text-cyan-900">
+            준공정산 최종 결재 요청이 등록되었습니다. 통합결재함에서 승인되어야 정산완료 처리됩니다.
+          </div>
+        )}
         <div className="grid gap-4 lg:grid-cols-2">
           <Field label="정산 비고">
-            <textarea value={form.settlement_notes} onChange={(event) => setForm({ ...form, settlement_notes: event.target.value })} className="input min-h-24" />
+            <textarea value={form.settlement_notes} onChange={(event) => setForm({ ...form, settlement_notes: event.target.value })} className="input min-h-24" disabled={editingDisabled} />
           </Field>
           <Field label="미지급 처리 사유">
-            <textarea value={form.unpaid_handling_reason} onChange={(event) => setForm({ ...form, unpaid_handling_reason: event.target.value })} className="input min-h-24" disabled={!hasUnpaidBalance} />
+            <textarea value={form.unpaid_handling_reason} onChange={(event) => setForm({ ...form, unpaid_handling_reason: event.target.value })} className="input min-h-24" disabled={!hasUnpaidBalance || editingDisabled} />
           </Field>
         </div>
         <label className="mt-4 flex items-center gap-2 text-sm font-semibold text-slate-700">
@@ -144,19 +168,19 @@ export function SettlementPanel({
             type="checkbox"
             checked={form.force_complete_if_unpaid}
             onChange={(event) => setForm({ ...form, force_complete_if_unpaid: event.target.checked })}
-            disabled={!hasUnpaidBalance}
+            disabled={!hasUnpaidBalance || editingDisabled}
           />
           미지급 잔액이 있어도 사유를 남기고 정산완료 처리
         </label>
         <div className="mt-5 flex justify-end">
           <button
             type="button"
-            onClick={completeSettlement}
-            disabled={settlement.is_settled || (hasUnpaidBalance && (!form.force_complete_if_unpaid || !form.unpaid_handling_reason.trim()))}
+            onClick={requestSettlementApproval}
+            disabled={editingDisabled || (hasUnpaidBalance && (!form.force_complete_if_unpaid || !form.unpaid_handling_reason.trim()))}
             className="inline-flex items-center gap-2 rounded-md bg-cyan-700 px-4 py-2 text-sm font-semibold text-white hover:bg-cyan-800 disabled:cursor-not-allowed disabled:bg-slate-300"
           >
             <CheckCircle2 className="h-4 w-4" aria-hidden="true" />
-            준공정산 완료
+            준공정산 최종 결재요청
           </button>
         </div>
         {settlement.is_settled && (

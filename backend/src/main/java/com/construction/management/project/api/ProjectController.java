@@ -154,6 +154,14 @@ public class ProjectController {
 		return projectRevisionService.get(projectId, revisionId);
 	}
 
+	@GetMapping("/{projectId}/revisions/{revisionId}/history")
+	public ProjectRevisionHistoryResponse getRevisionHistory(
+			@PathVariable("projectId") String projectId,
+			@PathVariable("revisionId") String revisionId
+	) {
+		return projectRevisionService.history(projectId, revisionId);
+	}
+
 	@PutMapping("/{projectId}/revisions/{revisionId}/contract")
 	public ProjectRevisionResponse saveRevisionContract(
 			@PathVariable("projectId") String projectId,
@@ -429,12 +437,12 @@ public class ProjectController {
 		return projectSettlementService.getSettlement(projectId);
 	}
 
-	@PostMapping("/{projectId}/settlement/complete")
-	public ProjectSettlementResponse completeSettlement(
+	@PostMapping({"/{projectId}/settlement/request-approval", "/{projectId}/settlement/complete"})
+	public ProjectSettlementResponse requestSettlementApproval(
 			@PathVariable("projectId") String projectId,
 			@RequestBody ProjectSettlementCompleteRequest request
 	) {
-		return projectSettlementService.completeSettlement(projectId, request);
+		return projectSettlementService.requestSettlementApproval(projectId, request);
 	}
 
 	@PostMapping("/{projectId}/progress-claims")
@@ -443,6 +451,14 @@ public class ProjectController {
 			@RequestBody ProgressPaymentRequest.Claim request
 	) {
 		return progressPaymentService.createClaim(projectId, request);
+	}
+
+	@DeleteMapping("/{projectId}/progress-claims/{claimId}")
+	public ProgressPaymentResponse deleteUnapprovedProgressClaim(
+			@PathVariable("projectId") String projectId,
+			@PathVariable("claimId") String claimId
+	) {
+		return progressPaymentService.deleteUnapprovedClaim(projectId, claimId);
 	}
 
 	@PostMapping("/{projectId}/progress-claims/{claimId}/payments")

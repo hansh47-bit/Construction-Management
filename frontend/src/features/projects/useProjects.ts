@@ -34,8 +34,8 @@ export function useProjects({ onError, onDeleted }: { onError: (message: string 
     if (!window.confirm(`“${project.project_name}” 프로젝트와 연결된 계약·예산·발주·기성·지급·결재·변경 데이터를 모두 영구 삭제할까요?\n정산완료 프로젝트만 삭제할 수 없습니다.`)) return
     const response = await projectApi.remove(project.project_id)
     if (!response.ok) {
-      const body = await response.json().catch(() => null) as { detail?: string; message?: string } | null
-      onError(body?.detail ?? body?.message ?? `프로젝트 삭제 실패: ${response.status}`)
+      const body = await response.json().catch(() => null) as { detail?: string; message?: string; error?: string } | null
+      onError(body?.detail ?? body?.message ?? body?.error ?? `프로젝트 삭제 실패: ${response.status}`)
       return
     }
     onDeleted(project.project_id); onError(null); await refreshProjects(keyword)

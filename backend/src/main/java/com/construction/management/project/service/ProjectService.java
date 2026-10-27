@@ -7,6 +7,7 @@ import com.construction.management.project.api.IntegratedSummaryResponse.ProfitA
 import com.construction.management.project.api.IntegratedSummaryResponse.ProjectInfo;
 import com.construction.management.project.api.ProjectCreateRequest;
 import com.construction.management.project.api.ProjectResponse;
+import com.construction.management.project.api.ProjectRevisionResponse;
 import com.construction.management.project.domain.ActualPayment;
 import com.construction.management.project.domain.ApprovalStatus;
 import com.construction.management.project.domain.BudgetChange;
@@ -17,6 +18,7 @@ import com.construction.management.project.domain.PoChange;
 import com.construction.management.project.domain.ProgressClaim;
 import com.construction.management.project.domain.Project;
 import com.construction.management.project.domain.ProjectExecutionBudgetItem;
+import com.construction.management.project.domain.ProjectRevision;
 import com.construction.management.project.domain.ProjectStatus;
 import com.construction.management.project.domain.PurchaseOrder;
 import com.construction.management.project.repository.ActualPaymentRepository;
@@ -86,6 +88,7 @@ public class ProjectService {
 	private final ProjectSettlementRepository projectSettlementRepository;
 	private final VendorComparisonRepository vendorComparisonRepository;
 	private final ProjectRevisionRepository projectRevisionRepository;
+	private final ProjectRevisionService projectRevisionService;
 
 	public ProjectService(
 			ProjectRepository projectRepository,
@@ -109,7 +112,8 @@ public class ProjectService {
 			ProjectExecutionBudgetDetailRepository projectExecutionBudgetDetailRepository,
 			ProjectSettlementRepository projectSettlementRepository,
 			VendorComparisonRepository vendorComparisonRepository,
-			ProjectRevisionRepository projectRevisionRepository
+			ProjectRevisionRepository projectRevisionRepository,
+			ProjectRevisionService projectRevisionService
 	) {
 		this.projectRepository = projectRepository;
 		this.projectContractRepository = projectContractRepository;
@@ -133,6 +137,7 @@ public class ProjectService {
 		this.projectSettlementRepository = projectSettlementRepository;
 		this.vendorComparisonRepository = vendorComparisonRepository;
 		this.projectRevisionRepository = projectRevisionRepository;
+		this.projectRevisionService = projectRevisionService;
 	}
 
 	@Transactional
@@ -287,16 +292,19 @@ public class ProjectService {
 				.map(ContractChange::getChangeAmount)
 				.map(ProjectService::defaultZero)
 				.reduce(BigDecimal.ZERO, BigDecimal::add);
-		BigDecimal currentContractAmount = customerContractItems.isEmpty()
+		BigDecimal legacyCurrentContractAmount = customerContractItems.isEmpty()
 				? projectContractRepository.findByProjectId(projectId).stream()
 						.map(contract -> defaultZero(contract.getInitialAmount()))
 						.reduce(BigDecimal.ZERO, BigDecimal::add)
 						.add(approvedContractChangeAmount)
 				: customerContractItems.stream()
 						.map(CustomerContractItem::getContractAmount)
-						.map(ProjectService::defaultZero)
-						.reduce(BigDecimal.ZERO, BigDecimal::add)
-						.add(approvedContractChangeAmount);
+				.map(ProjectService::defaultZero)
+				.reduce(BigDecimal.ZERO, BigDecimal::add)
+				.add(approvedContractChangeAmount);
+		ProjectRevisionResponse approvedRevision = projectRevisionService.latestApprovedRevision(projectId).orElse(null);
+		BigDecimal currentContractAmount = approvedRevision == null ? legacyCurrentContractAmount : approvedRevision.contractTotal();
+		BigDecimal currentTargetProfitRate = approvedRevision == null ? project.getTargetProfitRate() : approvedRevision.targetProfitRate();
 
 		List<ExecutionBudget> budgets = executionBudgetRepository.findByProjectId(projectId);
 		List<String> budgetIds = budgets.stream().map(ExecutionBudget::getBudgetId).toList();
@@ -308,7 +316,10 @@ public class ProjectService {
 								Collectors.mapping(change -> defaultZero(change.getChangeAmount()), Collectors.reducing(BigDecimal.ZERO, BigDecimal::add))
 						));
 
-		List<PurchaseOrder> purchaseOrders = purchaseOrderRepository.findByProjectId(projectId);
+		String currentRevisionId = projectRevisionRepository.findTopByProjectIdAndStatusOrderByRevisionNumberDesc(projectId, "APPROVED")
+				.map(ProjectRevision::getRevisionId)
+				.orElse(null);
+		List<PurchaseOrder> purchaseOrders = purchaseOrderRepository.findByProjectIdAndRevisionIdOrderByPoIdDesc(projectId, currentRevisionId);
 		List<String> poIds = purchaseOrders.stream().map(PurchaseOrder::getPoId).toList();
 		Map<String, BigDecimal> poChangesByPo = poIds.isEmpty()
 				? Map.of()
@@ -392,7 +403,7 @@ public class ProjectService {
 				? BigDecimal.ZERO
 				: expectedProfit.multiply(BigDecimal.valueOf(100)).divide(currentContractAmount, 1, RoundingMode.HALF_UP);
 		BigDecimal targetCostLimit = currentContractAmount
-				.multiply(BigDecimal.ONE.subtract(defaultZero(project.getTargetProfitRate()).divide(BigDecimal.valueOf(100), 6, RoundingMode.HALF_UP)))
+				.multiply(BigDecimal.ONE.subtract(defaultZero(currentTargetProfitRate).divide(BigDecimal.valueOf(100), 6, RoundingMode.HALF_UP)))
 				.setScale(0, RoundingMode.HALF_UP);
 		BigDecimal unbilledAmount = currentPurchaseAmount.subtract(accumulatedCompletedAmount);
 		BigDecimal approvedUnpaidAmount = accumulatedCompletedAmount.subtract(actualPaidAmount);

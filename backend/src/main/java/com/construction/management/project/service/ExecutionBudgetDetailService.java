@@ -5,6 +5,7 @@ import com.construction.management.project.api.ExecutionBudgetDetailResponse;
 import com.construction.management.project.api.ExecutionBudgetDetailResponse.Detail;
 import com.construction.management.project.api.ExecutionBudgetDetailResponse.SummaryItem;
 import com.construction.management.project.api.ProjectRevisionBudgetView;
+import com.construction.management.project.api.ProjectRevisionResponse;
 import com.construction.management.project.domain.ApprovalStatus;
 import com.construction.management.project.domain.BudgetChange;
 import com.construction.management.project.domain.ContractChange;
@@ -80,8 +81,15 @@ public class ExecutionBudgetDetailService {
 		Project project = getProject(projectId);
 		boolean locked = itemRepository.findByProjectIdOrderByItemIdAsc(projectId).stream()
 				.anyMatch(item -> ApprovalStatus.REQUESTED.name().equals(item.getApprovalStatus()) || ApprovalStatus.APPROVED.name().equals(item.getApprovalStatus()));
-		if (locked) {
+		boolean rewriteAvailable = projectRevisionService.isExecutionBudgetRewriteAvailable(projectId);
+		if (locked && !rewriteAvailable) {
 			throw new IllegalStateException("결재 대기 또는 승인 완료 상태의 실행예산은 수정할 수 없습니다.");
+		}
+		if (locked) {
+			itemRepository.findByProjectIdOrderByItemIdAsc(projectId).forEach(item -> {
+				item.resetForBudgetRewrite();
+				itemRepository.save(item);
+			});
 		}
 
 		detailRepository.deleteByProjectId(projectId);
@@ -104,6 +112,9 @@ public class ExecutionBudgetDetailService {
 				.toList();
 		detailRepository.saveAll(details);
 		rollup(projectId, details);
+		if (rewriteAvailable) {
+			projectRevisionService.updateApprovedRevisionBudgetSnapshot(projectId, details);
+		}
 
 		return toResponse(project, null);
 	}
@@ -153,30 +164,38 @@ public class ExecutionBudgetDetailService {
 						.toList()
 				: appliedRevision.details();
 		List<ProjectExecutionBudgetItem> items = itemRepository.findByProjectIdOrderByItemIdAsc(project.getProjectId());
+		Map<String, List<Detail>> detailsByItem = details.stream()
+				.collect(Collectors.groupingBy(Detail::budgetItemId));
 		String approvalStatus = executionBudgetApprovalStatus(items);
 		String approvalId = items.stream().map(ProjectExecutionBudgetItem::getApprovalId).filter(StringUtils::hasText).findFirst().orElse(null);
 		String approvalComment = items.stream().map(ProjectExecutionBudgetItem::getApprovalComment).filter(StringUtils::hasText).findFirst().orElse(null);
+		boolean rewriteAvailable = projectRevisionService.isExecutionBudgetRewriteAvailable(project.getProjectId());
 		List<String> itemIds = items.stream().map(ProjectExecutionBudgetItem::getItemId).toList();
 		Map<String, BigDecimal> changesByItem = itemIds.isEmpty() ? Map.of() : budgetChangeRepository.findByBudgetIdInAndApprovalStatus(itemIds, ApprovalStatus.APPROVED).stream()
 				.collect(Collectors.groupingBy(BudgetChange::getBudgetId, Collectors.mapping(change -> defaultZero(change.getChangeAmount()), Collectors.reducing(BigDecimal.ZERO, BigDecimal::add))));
 		Map<String, String> purchaseOrderStatusByItem = poRequisitionRepository.findByProjectIdOrderByCreatedAtDesc(project.getProjectId()).stream()
 				.collect(Collectors.toMap(PoRequisition::getExecutionItemId, PoRequisition::getApprovalStatus, (latest, ignored) -> latest));
-		BigDecimal approvedAmount = items.stream()
-				.filter(ProjectExecutionBudgetItem::isApproved)
-				.map(item -> defaultZero(item.getApprovedBudgetAmount()).add(changesByItem.getOrDefault(item.getItemId(), BigDecimal.ZERO)))
-				.reduce(BigDecimal.ZERO, BigDecimal::add);
 		BigDecimal totalDetailAmount = details.stream()
 				.map(Detail::amount)
 				.map(ExecutionBudgetDetailService::defaultZero)
 				.reduce(BigDecimal.ZERO, BigDecimal::add);
-		BigDecimal contractSupplyAmount = customerContractItemRepository.findByProjectIdOrderByWorkCategoryAsc(project.getProjectId()).stream()
+		BigDecimal approvedAmount = appliedRevision == null
+				? items.stream()
+						.filter(ProjectExecutionBudgetItem::isApproved)
+						.map(item -> defaultZero(item.getApprovedBudgetAmount()).add(changesByItem.getOrDefault(item.getItemId(), BigDecimal.ZERO)))
+						.reduce(BigDecimal.ZERO, BigDecimal::add)
+				: totalDetailAmount;
+		BigDecimal storedContractSupplyAmount = customerContractItemRepository.findByProjectIdOrderByWorkCategoryAsc(project.getProjectId()).stream()
 				.map(CustomerContractItem::getContractAmount)
 				.map(ExecutionBudgetDetailService::defaultZero)
 				.reduce(BigDecimal.ZERO, BigDecimal::add)
 				.add(contractChangeRepository.findByProjectIdAndApprovalStatus(project.getProjectId(), ApprovalStatus.APPROVED).stream()
 						.map(ContractChange::getChangeAmount).map(ExecutionBudgetDetailService::defaultZero).reduce(BigDecimal.ZERO, BigDecimal::add));
+		ProjectRevisionResponse approvedRevision = projectRevisionService.latestApprovedRevision(project.getProjectId()).orElse(null);
+		BigDecimal contractSupplyAmount = approvedRevision == null ? storedContractSupplyAmount : approvedRevision.contractTotal();
+		BigDecimal targetProfitRate = approvedRevision == null ? project.getTargetProfitRate() : approvedRevision.targetProfitRate();
 		BigDecimal targetCostLimit = contractSupplyAmount
-				.multiply(BigDecimal.ONE.subtract(defaultZero(project.getTargetProfitRate()).divide(BigDecimal.valueOf(100), 6, RoundingMode.HALF_UP)))
+				.multiply(BigDecimal.ONE.subtract(defaultZero(targetProfitRate).divide(BigDecimal.valueOf(100), 6, RoundingMode.HALF_UP)))
 				.setScale(0, RoundingMode.HALF_UP);
 
 		return new ExecutionBudgetDetailResponse(
@@ -188,6 +207,7 @@ public class ExecutionBudgetDetailService {
 			approvalStatus,
 			approvalId,
 			approvalComment,
+			rewriteAvailable,
 			appliedRevision == null ? null : appliedRevision.revisionNumber(),
 			approvedAmount,
 				totalDetailAmount,
@@ -197,7 +217,11 @@ public class ExecutionBudgetDetailService {
 						.filter(item -> appliedRevision == null || details.stream().anyMatch(detail -> detail.budgetItemId().equals(ProjectExecutionBudgetItem.budgetItemId(project.getProjectId(), item.getItemId()))))
 						.map(item -> new SummaryItem(ProjectExecutionBudgetItem.budgetItemId(project.getProjectId(), item.getItemId()), item.getCategoryName(), item.getItemName(), item.getApprovalStatus(),
 						purchaseOrderStatusByItem.getOrDefault(ProjectExecutionBudgetItem.budgetItemId(project.getProjectId(), item.getItemId()), "NOT_REQUESTED"),
-						item.isApproved() ? defaultZero(item.getApprovedBudgetAmount()).add(changesByItem.getOrDefault(item.getItemId(), BigDecimal.ZERO)) : item.getBudgetAmount()))
+						requiresProcurement(detailsByItem.get(ProjectExecutionBudgetItem.budgetItemId(project.getProjectId(), item.getItemId()))),
+						appliedRevision == null
+								? (item.isApproved() ? defaultZero(item.getApprovedBudgetAmount()).add(changesByItem.getOrDefault(item.getItemId(), BigDecimal.ZERO)) : item.getBudgetAmount())
+								: detailsByItem.getOrDefault(ProjectExecutionBudgetItem.budgetItemId(project.getProjectId(), item.getItemId()), List.of()).stream()
+										.map(Detail::amount).map(ExecutionBudgetDetailService::defaultZero).reduce(BigDecimal.ZERO, BigDecimal::add)))
 						.toList(),
 			details
 		);
@@ -226,5 +250,10 @@ public class ExecutionBudgetDetailService {
 
 	private static BigDecimal defaultZero(BigDecimal value) {
 		return value == null ? BigDecimal.ZERO : value;
+	}
+
+	private static boolean requiresProcurement(List<Detail> details) {
+		return details == null || details.isEmpty()
+				|| details.stream().anyMatch(detail -> !"현장경비".equals(detail.costType()));
 	}
 }

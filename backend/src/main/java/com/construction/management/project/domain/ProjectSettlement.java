@@ -78,7 +78,7 @@ public class ProjectSettlement {
 	private BigDecimal profitMarginRate;
 
 	@Column(name = "settlement_status", nullable = false, length = 32)
-	private String settlementStatus = "SETTLED";
+	private String settlementStatus = "DRAFT";
 
 	@Column(name = "settlement_notes", length = 1000)
 	private String settlementNotes;
@@ -113,14 +113,13 @@ public class ProjectSettlement {
 		this.createdAt = LocalDateTime.now();
 	}
 
-	public ProjectSettlement settle(
+	public ProjectSettlement requestApproval(
 			ProjectSettlementSnapshot snapshot,
 			BigDecimal uncollectedReceivable,
 			BigDecimal settlementExpense,
 			BigDecimal settlementTax,
 			String settlementNotes,
-			String unpaidHandlingReason,
-			String settledBy
+			String unpaidHandlingReason
 	) {
 		this.initialContractAmount = snapshot.initialContractAmount();
 		this.changeContractAmount = snapshot.changeContractAmount();
@@ -140,18 +139,45 @@ public class ProjectSettlement {
 		this.finalCost = snapshot.finalCost();
 		this.finalProfit = snapshot.finalProfit();
 		this.profitMarginRate = snapshot.profitMarginRate();
-		this.settlementStatus = "SETTLED";
+		this.settlementStatus = "REQUESTED";
 		this.settlementNotes = settlementNotes;
 		this.unpaidHandlingReason = unpaidHandlingReason;
-		this.settledBy = settledBy;
-		this.settledAt = LocalDateTime.now();
+		this.settledBy = null;
+		this.settledAt = null;
 		return this;
+	}
+
+	public void approve(String approver) {
+		this.settlementStatus = "SETTLED";
+		this.settledBy = approver;
+		this.settledAt = LocalDateTime.now();
+	}
+
+	public void reject() {
+		this.settlementStatus = "REJECTED";
+		this.settledBy = null;
+		this.settledAt = null;
+	}
+
+	public boolean isSettled() {
+		return "SETTLED".equals(settlementStatus);
+	}
+
+	public ProjectSettlementSnapshot snapshot() {
+		return new ProjectSettlementSnapshot(
+				initialContractAmount, changeContractAmount, finalContractAmount,
+				initialBudgetAmount, changeBudgetAmount, finalBudgetAmount,
+				initialPoAmount, changePoAmount, finalPoAmount,
+				approvedClaimsTotal, actualPaidTotal, unpaidBalance,
+				settlementExpense, settlementTax, finalCost, finalProfit, profitMarginRate
+		);
 	}
 
 	public String getSettlementId() {
 		return settlementId;
 	}
 
+	public String getProjectId() { return projectId; }
 	public String getRevisionId() { return revisionId; }
 
 	public BigDecimal getUncollectedReceivable() {

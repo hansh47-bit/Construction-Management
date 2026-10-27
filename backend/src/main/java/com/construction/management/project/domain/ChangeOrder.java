@@ -32,11 +32,11 @@ public class ChangeOrder {
 	@Column(name = "revision_number")
 	private Integer revisionNumber;
 
-	@Column(name = "contract_change_enabled")
-	private boolean contractChangeEnabled;
+	@Column(name = "contract_change_enabled", nullable = false)
+	private boolean contractChangeEnabled = true;
 
-	@Column(name = "budget_change_enabled")
-	private boolean budgetChangeEnabled;
+	@Column(name = "budget_change_enabled", nullable = false)
+	private boolean budgetChangeEnabled = true;
 
 	@Column(name = "created_at", nullable = false)
 	private LocalDateTime createdAt;

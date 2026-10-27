@@ -9,6 +9,7 @@ import com.construction.management.project.domain.Approval;
 import com.construction.management.project.domain.ApprovalStatus;
 import com.construction.management.project.domain.PoRequisition;
 import com.construction.management.project.domain.Project;
+import com.construction.management.project.domain.ProjectSettlement;
 import com.construction.management.project.domain.ProjectExecutionBudgetDetail;
 import com.construction.management.project.domain.ProjectExecutionBudgetItem;
 import com.construction.management.project.domain.ProjectStatus;
@@ -20,6 +21,7 @@ import com.construction.management.project.repository.PoRequisitionRepository;
 import com.construction.management.project.repository.ProjectExecutionBudgetDetailRepository;
 import com.construction.management.project.repository.ProjectExecutionBudgetItemRepository;
 import com.construction.management.project.repository.ProjectRepository;
+import com.construction.management.project.repository.ProjectSettlementRepository;
 import com.construction.management.project.repository.ProgressClaimRepository;
 import com.construction.management.project.repository.PurchaseOrderRepository;
 import com.construction.management.project.repository.VendorComparisonRepository;
@@ -46,6 +48,7 @@ public class ApprovalService {
 	public static final String TYPE_BUDGET_CHANGE = "BUDGET_CHANGE";
 	public static final String TYPE_PO_CHANGE = "PO_CHANGE";
 	public static final String TYPE_PROJECT_REVISION = "PROJECT_REVISION";
+	public static final String TYPE_FINAL_SETTLEMENT = "FINAL_SETTLEMENT";
 
 	private final ApprovalRepository approvalRepository;
 	private final ProjectRepository projectRepository;
@@ -55,6 +58,7 @@ public class ApprovalService {
 	private final VendorComparisonRepository comparisonRepository;
 	private final PurchaseOrderRepository purchaseOrderRepository;
 	private final ProgressClaimRepository progressClaimRepository;
+	private final ProjectSettlementRepository settlementRepository;
 	private final ExecutionBudgetDetailService executionBudgetDetailService;
 	private final ProjectSettlementService projectSettlementService;
 	private final PaymentRequestService paymentRequestService;
@@ -72,6 +76,7 @@ public class ApprovalService {
 			VendorComparisonRepository comparisonRepository,
 			PurchaseOrderRepository purchaseOrderRepository,
 			ProgressClaimRepository progressClaimRepository,
+			ProjectSettlementRepository settlementRepository,
 			ExecutionBudgetDetailService executionBudgetDetailService,
 			ProjectSettlementService projectSettlementService,
 			PaymentRequestService paymentRequestService,
@@ -88,6 +93,7 @@ public class ApprovalService {
 		this.comparisonRepository = comparisonRepository;
 		this.purchaseOrderRepository = purchaseOrderRepository;
 		this.progressClaimRepository = progressClaimRepository;
+		this.settlementRepository = settlementRepository;
 		this.executionBudgetDetailService = executionBudgetDetailService;
 		this.projectSettlementService = projectSettlementService;
 		this.paymentRequestService = paymentRequestService;
@@ -161,7 +167,8 @@ public class ApprovalService {
 		if (approvalRepository.existsByProjectIdAndApprovalTypeAndStatus(projectId, TYPE_EXECUTION_BUDGET, ApprovalStatus.REQUESTED)) {
 			throw new IllegalArgumentException("이미 결재 대기 중인 실행예산 요청이 있습니다.");
 		}
-		if (approvalRepository.existsByProjectIdAndApprovalTypeAndStatus(projectId, TYPE_EXECUTION_BUDGET, ApprovalStatus.APPROVED)) {
+		boolean rewriteAvailable = projectRevisionService.isExecutionBudgetRewriteAvailable(projectId);
+		if (approvalRepository.existsByProjectIdAndApprovalTypeAndStatus(projectId, TYPE_EXECUTION_BUDGET, ApprovalStatus.APPROVED) && !rewriteAvailable) {
 			throw new IllegalArgumentException("이미 승인된 최초 실행예산이 있습니다. 변경은 변경관리에서 처리해야 합니다.");
 		}
 
@@ -187,6 +194,9 @@ public class ApprovalService {
 			item.markApprovalRequested(approval.getApprovalId());
 			budgetItemRepository.save(item);
 		});
+		if (rewriteAvailable) {
+			projectRevisionService.consumeExecutionBudgetRewrite(projectId);
+		}
 		return ApprovalResponse.from(
 				approval,
 				project,
@@ -287,6 +297,8 @@ public class ApprovalService {
 			changeManagementService.approveChangeApproval(approval);
 		} else if (TYPE_PROJECT_REVISION.equals(approval.getApprovalType())) {
 			projectRevisionService.approveRevision(approval.getProjectId(), approval.getTargetId(), approval.getApprovalId());
+		} else if (TYPE_FINAL_SETTLEMENT.equals(approval.getApprovalType())) {
+			projectSettlementService.approveRequestedSettlement(approval.getProjectId(), approval.getTargetId(), decisionUser(request));
 		} else {
 			throw new IllegalArgumentException("지원하지 않는 결재 유형입니다: " + approval.getApprovalType());
 		}
@@ -320,6 +332,8 @@ public class ApprovalService {
 			changeManagementService.rejectChangeApproval(approval);
 		} else if (TYPE_PROJECT_REVISION.equals(approval.getApprovalType())) {
 			projectRevisionService.rejectRevision(approval.getProjectId(), approval.getTargetId());
+		} else if (TYPE_FINAL_SETTLEMENT.equals(approval.getApprovalType())) {
+			projectSettlementService.rejectRequestedSettlement(approval.getProjectId(), approval.getTargetId());
 		}
 		approval.reject(decisionUser(request), request.comment());
 		approvalRepository.save(approval);
@@ -472,6 +486,16 @@ public class ApprovalService {
 			return new ApprovalResponse.ProgressClaimDetail(
 					claim.getClaimId(), purchaseOrder.getPoId(), purchaseOrder.getVendorName(), purchaseOrder.getBudgetId(),
 					item == null ? null : item.getCategoryName(), item == null ? null : item.getItemName(), claim.getDegree(), claim.getClaimAmount(), approvedClaimTotal);
+		}
+		if (TYPE_FINAL_SETTLEMENT.equals(approval.getApprovalType())) {
+			ProjectSettlement settlement = settlementRepository.findById(approval.getTargetId())
+					.orElseThrow(() -> new EntityNotFoundException("준공정산 요청을 찾을 수 없습니다: " + approval.getTargetId()));
+			ProjectSettlement.ProjectSettlementSnapshot snapshot = settlement.snapshot();
+			return new ApprovalResponse.FinalSettlementDetail(
+					snapshot.finalContractAmount(), snapshot.finalBudgetAmount(), snapshot.finalPoAmount(),
+					settlement.getSettlementExpense(), settlement.getSettlementTax(), snapshot.unpaidBalance(),
+					snapshot.finalCost(), snapshot.finalProfit(), snapshot.profitMarginRate()
+			);
 		}
 		return null;
 	}

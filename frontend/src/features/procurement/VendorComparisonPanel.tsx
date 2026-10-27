@@ -19,8 +19,6 @@ function purchaseOrderStatusClass(status?: string) {
   return 'border-slate-300 bg-slate-50 text-slate-700'
 }
 
-const vatTypes = ['별도', '포함', '면세']
-
 export function VendorComparisonPanel({
   executionBudget,
   revisionProcurementItemIds,
@@ -52,7 +50,7 @@ export function VendorComparisonPanel({
   uploadVendorComparisonFile: (index: number, file: File) => void
   openPurchaseOrderHistory: () => void
 }) {
-	const approvedItems = executionBudget.summary_by_item.filter((item) => item.approval_status === 'APPROVED' && (revisionProcurementItemIds === null || revisionProcurementItemIds.includes(item.budget_item_id)))
+	const approvedItems = executionBudget.summary_by_item.filter((item) => item.approval_status === 'APPROVED' && item.procurement_required && (revisionProcurementItemIds === null || revisionProcurementItemIds.includes(item.budget_item_id)))
   const hasApprovedItems = approvedItems.length > 0
   const selected = comparisons.find((comparison) => comparison.is_selected)
   const selectedExecutionItem = approvedItems.find((item) => item.budget_item_id === selectedExecutionItemId)
@@ -80,7 +78,7 @@ export function VendorComparisonPanel({
       </div>
 
 		{!hasApprovedItems && (
-			<p className="border-b border-slate-200 py-5 text-sm text-slate-500">{revisionProcurementItemIds !== null ? '승인된 차수의 실행예산 항목이 없습니다. 기존 발주를 수정해야 하면 별도 발주변경 결재로 처리합니다.' : '승인된 세부실행예산 항목이 있어야 업체 비교견적을 작성할 수 있습니다.'}</p>
+			<p className="border-b border-slate-200 py-5 text-sm text-slate-500">{revisionProcurementItemIds !== null ? '승인된 차수의 발주 대상 실행예산 항목이 없습니다. 현장경비 항목은 준공정산의 준공경비로 자동 반영됩니다.' : '승인된 발주 대상 실행예산 항목이 있어야 업체 비교견적을 작성할 수 있습니다. 현장경비 항목은 준공정산에서 처리합니다.'}</p>
 		)}
       <div className="grid gap-4 border-b border-slate-200 py-5 lg:grid-cols-[260px_1fr_1fr_1fr]">
         <label className="block text-sm font-semibold text-slate-700">
@@ -116,7 +114,7 @@ export function VendorComparisonPanel({
         </div>
       )}
 
-      {selected && (
+		{hasApprovedItems && selected && (
         <div className="border-b border-slate-200 py-5">
           <h3 className="text-sm font-semibold text-slate-900">발주품의서</h3>
           <div className="mt-3 rounded-md border border-slate-200 bg-slate-50 p-4 text-sm">
@@ -150,24 +148,21 @@ export function VendorComparisonPanel({
 
       <div className="py-5">
         <div className="overflow-x-auto">
-          <table className="min-w-[1780px] text-left text-sm">
+          <table className="min-w-[1640px] text-left text-sm">
             <thead className="bg-slate-50 text-xs font-semibold uppercase text-slate-500">
               <tr>
-                <th className="px-3 py-3">비교ID</th>
+                <th className="min-w-40 whitespace-nowrap px-3 py-3">비교ID</th>
                 <th className="px-3 py-3">프로젝트</th>
                 <th className="px-3 py-3">실행항목ID</th>
                 <th className="px-3 py-3">공종</th>
                 <th className="px-3 py-3">실행항목</th>
                 <th className="min-w-40 bg-cyan-50 px-4 py-3 text-sm text-cyan-900">승인 실행예산</th>
-                <th className="px-3 py-3">업체</th>
+                <th className="min-w-56 whitespace-nowrap px-3 py-3">업체</th>
                 <th className="min-w-44 bg-amber-50 px-4 py-3 text-sm text-amber-900">견적금액</th>
-                <th className="px-3 py-3">VAT</th>
-                <th className="px-3 py-3">공사기간</th>
-                <th className="px-3 py-3">포함범위/특이사항</th>
+                <th className="min-w-44 whitespace-nowrap px-3 py-3">공사기간</th>
                 <th className="px-3 py-3">결제조건</th>
-                <th className="px-3 py-3">견적서링크</th>
                 <th className="px-3 py-3">선정</th>
-                <th className="px-3 py-3">선정사유</th>
+                <th className="min-w-64 whitespace-nowrap px-3 py-3">선정사유</th>
                 <th className="px-3 py-3">예산대비</th>
                 <th className="min-w-48 px-3 py-3">견적서 첨부</th>
                 <th className="px-3 py-3"></th>
@@ -176,28 +171,20 @@ export function VendorComparisonPanel({
             <tbody className="divide-y divide-slate-100">
               {comparisons.map((comparison, index) => {
                 const variance = (comparison.quoted_amount || 0) - approvedBudget
-                const vatType = vatTypes.includes(comparison.vat_type) ? comparison.vat_type : '별도'
                 return (
                   <tr key={comparison.comparison_id ?? index}>
-                    <td className="px-3 py-3"><input disabled={isPurchaseOrderLocked || (comparison.attachments ?? []).length > 0} value={comparison.comparison_code ?? ''} onChange={(event) => updateVendorComparison(index, 'comparison_code', event.target.value)} className="input" /></td>
+                    <td className="px-3 py-3"><input disabled={isPurchaseOrderLocked || (comparison.attachments ?? []).length > 0} value={comparison.comparison_code ?? ''} onChange={(event) => updateVendorComparison(index, 'comparison_code', event.target.value)} className="input !w-40" /></td>
                     <td className="px-3 py-3 text-slate-600">{vendorComparison.project_code}</td>
                     <td className="px-3 py-3 text-slate-600">{vendorComparison.execution_item_id}</td>
                     <td className="px-3 py-3 text-slate-600">{vendorComparison.work_category}</td>
                     <td className="px-3 py-3 text-slate-600">{vendorComparison.execution_item_name}</td>
                     <td className="min-w-40 whitespace-nowrap bg-cyan-50/70 px-4 py-4 text-lg font-extrabold tabular-nums text-cyan-950">{formatWon(approvedBudget)}</td>
-                    <td className="px-3 py-3"><input disabled={isPurchaseOrderLocked} value={comparison.vendor_name} onChange={(event) => updateVendorComparison(index, 'vendor_name', event.target.value)} className="input" /></td>
+                    <td className="px-3 py-3"><input disabled={isPurchaseOrderLocked} value={comparison.vendor_name} onChange={(event) => updateVendorComparison(index, 'vendor_name', event.target.value)} className="input !w-56" /></td>
                     <td className="min-w-44 bg-amber-50/70 px-4 py-4"><MoneyInput value={comparison.quoted_amount} disabled={isPurchaseOrderLocked} onChange={(value) => updateVendorComparison(index, 'quoted_amount', value)} className="min-w-36 border-amber-300 bg-white [&>input]:text-lg [&>input]:font-extrabold [&>input]:tabular-nums [&>span]:text-sm [&>span]:text-amber-700" /></td>
-                    <td className="px-3 py-3">
-                      <select disabled={isPurchaseOrderLocked} value={vatType} onChange={(event) => updateVendorComparison(index, 'vat_type', event.target.value)} className="input min-w-22">
-                        {vatTypes.map((type) => <option key={type} value={type}>{type}</option>)}
-                      </select>
-                    </td>
-                    <td className="px-3 py-3"><input disabled={isPurchaseOrderLocked} value={comparison.construction_period ?? ''} onChange={(event) => updateVendorComparison(index, 'construction_period', event.target.value)} className="input" /></td>
-                    <td className="px-3 py-3"><input disabled={isPurchaseOrderLocked} value={comparison.scope_and_notes ?? ''} onChange={(event) => updateVendorComparison(index, 'scope_and_notes', event.target.value)} className="input" /></td>
+                    <td className="px-3 py-3"><input disabled={isPurchaseOrderLocked} value={comparison.construction_period ?? ''} onChange={(event) => updateVendorComparison(index, 'construction_period', event.target.value)} className="input !w-44" /></td>
                     <td className="px-3 py-3"><input disabled={isPurchaseOrderLocked} value={comparison.payment_terms ?? ''} onChange={(event) => updateVendorComparison(index, 'payment_terms', event.target.value)} className="input" /></td>
-                    <td className="px-3 py-3"><input disabled={isPurchaseOrderLocked} value={comparison.estimate_file_url ?? ''} onChange={(event) => updateVendorComparison(index, 'estimate_file_url', event.target.value)} className="input" /></td>
                     <td className="px-3 py-3 text-center"><input disabled={isPurchaseOrderLocked} type="radio" checked={comparison.is_selected} onChange={() => updateVendorComparison(index, 'is_selected', true)} /></td>
-                    <td className="px-3 py-3"><input disabled={isPurchaseOrderLocked} value={comparison.selection_reason ?? ''} onChange={(event) => updateVendorComparison(index, 'selection_reason', event.target.value)} className="input" /></td>
+                    <td className="px-3 py-3"><input disabled={isPurchaseOrderLocked} value={comparison.selection_reason ?? ''} onChange={(event) => updateVendorComparison(index, 'selection_reason', event.target.value)} className="input !w-64" /></td>
                     <td className={`px-3 py-3 font-semibold ${varianceClass(variance)}`}>{formatWon(variance)}</td>
                     <td className="px-3 py-3">
                       <label className="inline-flex cursor-pointer items-center gap-2 rounded-md border border-slate-300 bg-white px-3 py-2 text-xs font-semibold text-slate-700 hover:bg-slate-50 has-[:disabled]:cursor-not-allowed has-[:disabled]:opacity-40">

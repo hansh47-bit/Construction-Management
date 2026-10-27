@@ -6,6 +6,7 @@ import java.util.Optional;
 import org.springframework.data.jpa.repository.JpaRepository;
 
 public interface VendorComparisonRepository extends JpaRepository<VendorComparison, String> {
+	List<VendorComparison> findByProjectIdAndRevisionIdOrderByExecutionItemIdAscComparisonIdAsc(String projectId, String revisionId);
 	List<VendorComparison> findByProjectIdAndExecutionItemIdAndRevisionIdOrderByComparisonIdAsc(String projectId, String executionItemId, String revisionId);
 	Optional<VendorComparison> findByProjectIdAndExecutionItemIdAndRevisionIdAndSelectedTrue(String projectId, String executionItemId, String revisionId);
 	boolean existsByProjectId(String projectId);

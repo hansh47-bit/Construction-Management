@@ -8,6 +8,7 @@ import com.construction.management.project.api.ProjectRevisionCreateRequest;
 import com.construction.management.project.api.ProjectRevisionResponse;
 import com.construction.management.project.api.ProjectRevisionProcurementResponse;
 import com.construction.management.project.api.ProjectRevisionBudgetView;
+import com.construction.management.project.api.ProjectRevisionHistoryResponse;
 import com.construction.management.project.api.ExecutionBudgetDetailResponse.Detail;
 import com.construction.management.project.api.ProjectRevisionResponse.BudgetDetail;
 import com.construction.management.project.api.ProjectRevisionResponse.ContractItem;
@@ -20,6 +21,10 @@ import com.construction.management.project.domain.Project;
 import com.construction.management.project.domain.ProjectExecutionBudgetDetail;
 import com.construction.management.project.domain.ProjectExecutionBudgetItem;
 import com.construction.management.project.domain.ProjectRevision;
+import com.construction.management.project.domain.VendorComparison;
+import com.construction.management.project.domain.PurchaseOrder;
+import com.construction.management.project.domain.ProgressClaim;
+import com.construction.management.project.domain.ActualPayment;
 import com.construction.management.project.repository.CustomerContractItemRepository;
 import com.construction.management.project.repository.ContractChangeRepository;
 import com.construction.management.project.repository.BudgetChangeRepository;
@@ -28,6 +33,10 @@ import com.construction.management.project.repository.ProjectExecutionBudgetDeta
 import com.construction.management.project.repository.ProjectExecutionBudgetItemRepository;
 import com.construction.management.project.repository.ProjectRepository;
 import com.construction.management.project.repository.ProjectRevisionRepository;
+import com.construction.management.project.repository.VendorComparisonRepository;
+import com.construction.management.project.repository.PurchaseOrderRepository;
+import com.construction.management.project.repository.ProgressClaimRepository;
+import com.construction.management.project.repository.ActualPaymentRepository;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import jakarta.persistence.EntityNotFoundException;
@@ -54,6 +63,10 @@ public class ProjectRevisionService {
 	private final ContractChangeRepository contractChangeRepository;
 	private final BudgetChangeRepository budgetChangeRepository;
 	private final ProjectSettlementService projectSettlementService;
+	private final VendorComparisonRepository vendorComparisonRepository;
+	private final PurchaseOrderRepository purchaseOrderRepository;
+	private final ProgressClaimRepository progressClaimRepository;
+	private final ActualPaymentRepository actualPaymentRepository;
 	private final ObjectMapper objectMapper;
 
 	public ProjectRevisionService(
@@ -66,6 +79,10 @@ public class ProjectRevisionService {
 			ContractChangeRepository contractChangeRepository,
 			BudgetChangeRepository budgetChangeRepository,
 			ProjectSettlementService projectSettlementService,
+			VendorComparisonRepository vendorComparisonRepository,
+			PurchaseOrderRepository purchaseOrderRepository,
+			ProgressClaimRepository progressClaimRepository,
+			ActualPaymentRepository actualPaymentRepository,
 			ObjectMapper objectMapper
 	) {
 		this.projectRepository = projectRepository;
@@ -77,6 +94,10 @@ public class ProjectRevisionService {
 		this.contractChangeRepository = contractChangeRepository;
 		this.budgetChangeRepository = budgetChangeRepository;
 		this.projectSettlementService = projectSettlementService;
+		this.vendorComparisonRepository = vendorComparisonRepository;
+		this.purchaseOrderRepository = purchaseOrderRepository;
+		this.progressClaimRepository = progressClaimRepository;
+		this.actualPaymentRepository = actualPaymentRepository;
 		this.objectMapper = objectMapper;
 	}
 
@@ -88,7 +109,7 @@ public class ProjectRevisionService {
 		ProjectRevision previous = revisions.isEmpty() ? null : revisions.get(0);
 		String contractSnapshot = previous == null ? json(currentContract(project)) : previous.getContractSnapshot();
 		String baseBudgetSnapshot = previous == null ? json(currentBudget(projectId)) : previous.getBudgetSnapshot();
-		String budgetSnapshot = json(new BudgetSnapshot(List.of()));
+		String budgetSnapshot = baseBudgetSnapshot;
 		int revisionNumber = revisions.stream().mapToInt(ProjectRevision::getRevisionNumber).max().orElse(1) + 1;
 		ProjectRevision revision = revisionRepository.save(new ProjectRevision(
 				"rev_" + UUID.randomUUID().toString().replace("-", ""),
@@ -113,6 +134,31 @@ public class ProjectRevisionService {
 	@Transactional(readOnly = true)
 	public ProjectRevisionResponse get(String projectId, String revisionId) {
 		return response(revision(projectId, revisionId));
+	}
+
+	@Transactional(readOnly = true)
+	public ProjectRevisionHistoryResponse history(String projectId, String revisionId) {
+		ProjectRevision revision = revision(projectId, revisionId);
+		List<PurchaseOrder> purchaseOrders = purchaseOrderRepository.findByProjectIdAndRevisionIdOrderByPoIdDesc(projectId, revisionId);
+		List<String> poIds = purchaseOrders.stream().map(PurchaseOrder::getPoId).toList();
+		Map<String, List<ProgressClaim>> claimsByPo = poIds.isEmpty() ? Map.of() : progressClaimRepository.findByPoIdIn(poIds).stream()
+				.collect(java.util.stream.Collectors.groupingBy(ProgressClaim::getPoId));
+		List<String> claimIds = claimsByPo.values().stream().flatMap(List::stream).map(ProgressClaim::getClaimId).toList();
+		Map<String, List<ActualPayment>> paymentsByClaim = claimIds.isEmpty() ? Map.of() : actualPaymentRepository.findByClaimIdIn(claimIds).stream()
+				.collect(java.util.stream.Collectors.groupingBy(ActualPayment::getClaimId));
+		return new ProjectRevisionHistoryResponse(
+				revision.getRevisionNumber(),
+				vendorComparisonRepository.findByProjectIdAndRevisionIdOrderByExecutionItemIdAscComparisonIdAsc(projectId, revisionId).stream()
+						.map(comparison -> new ProjectRevisionHistoryResponse.Comparison(comparison.getExecutionItemId(), comparison.getVendorName(), comparison.getQuotedAmount(), comparison.isSelected(), comparison.getSelectionReason(), comparison.getConstructionPeriod()))
+						.toList(),
+				purchaseOrders.stream().map(po -> new ProjectRevisionHistoryResponse.PurchaseOrder(
+						po.getPoId(), po.getBudgetId(), po.getVendorName(), po.getInitialPoAmount(), po.getApprovedBudgetAmount(),
+						claimsByPo.getOrDefault(po.getPoId(), List.of()).stream().map(claim -> new ProjectRevisionHistoryResponse.Claim(
+								claim.getClaimId(), claim.getDegree(), claim.getClaimAmount(), claim.getApprovalStatus().name(),
+								paymentsByClaim.getOrDefault(claim.getClaimId(), List.of()).stream().map(payment -> new ProjectRevisionHistoryResponse.Payment(payment.getPaymentId(), payment.getPaidAmount(), payment.getPaidDate(), payment.getPaymentStatus())).toList()
+						)).toList()
+				)).toList()
+		);
 	}
 
 	@Transactional
@@ -146,8 +192,8 @@ public class ProjectRevisionService {
 	@Transactional
 	public ApprovalResponse requestApproval(String projectId, String revisionId, ApprovalRequest request) {
 		ProjectRevision revision = revision(projectId, revisionId);
-		if (!"BUDGET_WRITTEN".equals(revision.getStatus())) {
-			throw new IllegalStateException("계약과 세부실행예산을 모두 저장한 차수만 결재 요청할 수 있습니다.");
+		if (!"CONTRACT_WRITTEN".equals(revision.getStatus()) && !"BUDGET_WRITTEN".equals(revision.getStatus())) {
+			throw new IllegalStateException("계약 변경 내용을 저장한 차수만 결재 요청할 수 있습니다.");
 		}
 		if (approvalRepository.existsByProjectIdAndApprovalTypeAndTargetIdAndStatus(projectId, ApprovalService.TYPE_PROJECT_REVISION, revisionId, ApprovalStatus.REQUESTED)) {
 			throw new IllegalStateException("이미 결재 대기 중인 변경 차수입니다.");
@@ -158,10 +204,10 @@ public class ProjectRevisionService {
 				projectId,
 				ApprovalService.TYPE_PROJECT_REVISION,
 				revisionId,
-				revision.getRevisionNumber() + "차 세부실행예산 전체 승인 요청",
-				detail.budgetTotal(),
-				detail.baseBudgetTotal(),
-				detail.budgetTotal().subtract(detail.baseBudgetTotal()),
+				revision.getRevisionNumber() + "차 계약 변경 승인 요청",
+				detail.contractTotal(),
+				detail.baseContractTotal(),
+				detail.contractTotal().subtract(detail.baseContractTotal()),
 				request != null && StringUtils.hasText(request.requestUser()) ? request.requestUser() : "system",
 				request != null && StringUtils.hasText(request.requestReason()) ? request.requestReason() : revision.getReason()
 		));
@@ -174,6 +220,7 @@ public class ProjectRevisionService {
 	public void approveRevision(String projectId, String revisionId, String approvalId) {
 		ProjectRevision revision = revision(projectId, revisionId);
 		if (!"REQUESTED".equals(revision.getStatus())) throw new IllegalStateException("결재 대기 중인 변경 차수만 승인할 수 있습니다.");
+		boolean contractOnlyRevision = budget(revision.getBaseBudgetSnapshot()).details().equals(budget(revision.getBudgetSnapshot()).details());
 		Project project = project(projectId);
 		ProjectRevisionResponse changed = response(revision);
 		project.updateTargetProfitRate(changed.targetProfitRate());
@@ -220,8 +267,51 @@ public class ProjectRevisionService {
 						"rev-budget-" + UUID.randomUUID().toString().replace("-", ""), item.getItemId(), revisionId, delta, ApprovalStatus.APPROVED));
 			}
 		}
+		if (contractOnlyRevision) {
+			revision.enableExecutionBudgetRewrite();
+		}
 		revision.approve();
 		revisionRepository.save(revision);
+	}
+
+	@Transactional(readOnly = true)
+	public boolean isExecutionBudgetRewriteAvailable(String projectId) {
+		return revisionRepository.findByProjectIdOrderByRevisionNumberDesc(projectId).stream()
+				.findFirst()
+				.map(this::isExecutionBudgetRewriteCandidate)
+				.orElse(false);
+	}
+
+	@Transactional
+	public void updateApprovedRevisionBudgetSnapshot(String projectId, List<ProjectExecutionBudgetDetail> details) {
+		ProjectRevision revision = revisionRepository.findByProjectIdOrderByRevisionNumberDesc(projectId).stream()
+				.filter(this::isExecutionBudgetRewriteCandidate)
+				.findFirst()
+				.orElse(null);
+		if (revision == null) {
+			return;
+		}
+		List<BudgetDetail> snapshotDetails = details.stream()
+				.map(detail -> new BudgetDetail(
+						detail.getBudgetItemId(), detail.getCategoryName(), detail.getItemName(), detail.getCostType(),
+						empty(detail.getVendorDescription()), empty(detail.getUnit()), zero(detail.getQuantity()), zero(detail.getUnitPrice()),
+						empty(detail.getEvidenceLink()), empty(detail.getNote())
+				))
+				.toList();
+		revision.enableExecutionBudgetRewrite();
+		revision.replaceBudgetSnapshot(json(new BudgetSnapshot(snapshotDetails)));
+		revisionRepository.save(revision);
+	}
+
+	@Transactional
+	public void consumeExecutionBudgetRewrite(String projectId) {
+		revisionRepository.findByProjectIdOrderByRevisionNumberDesc(projectId).stream()
+				.filter(this::isExecutionBudgetRewriteCandidate)
+				.findFirst()
+				.ifPresent(revision -> {
+					revision.consumeExecutionBudgetRewrite();
+					revisionRepository.save(revision);
+				});
 	}
 
 	@Transactional
@@ -263,6 +353,29 @@ public class ProjectRevisionService {
 					}
 					return new ProjectRevisionBudgetView(revision.getRevisionNumber(), responseDetails);
 				});
+	}
+
+	@Transactional(readOnly = true)
+	public Optional<BigDecimal> latestApprovedBudgetItemAmount(String projectId, String budgetItemId) {
+		return latestApprovedBudget(projectId).flatMap(view -> {
+			List<Detail> matchingDetails = view.details().stream()
+					.filter(detail -> budgetItemId.equals(detail.budgetItemId()))
+					.toList();
+			if (matchingDetails.isEmpty()) {
+				return Optional.empty();
+			}
+			return Optional.of(matchingDetails.stream()
+					.map(Detail::amount)
+					.map(ProjectRevisionService::zero)
+					.reduce(BigDecimal.ZERO, BigDecimal::add));
+		});
+	}
+
+	@Transactional(readOnly = true)
+	public Optional<ProjectRevisionResponse> latestApprovedRevision(String projectId) {
+		project(projectId);
+		return revisionRepository.findTopByProjectIdAndStatusOrderByRevisionNumberDesc(projectId, "APPROVED")
+				.map(this::response);
 	}
 
 	private ProjectRevisionResponse response(ProjectRevision revision) {
@@ -390,6 +503,11 @@ public class ProjectRevisionService {
 
 	private static BigDecimal zero(BigDecimal value) { return value == null ? BigDecimal.ZERO : value; }
 	private static String empty(String value) { return value == null ? "" : value; }
+
+	private boolean isExecutionBudgetRewriteCandidate(ProjectRevision revision) {
+		return "APPROVED".equals(revision.getStatus())
+				&& (revision.isExecutionBudgetRewriteAvailable() || budget(revision.getBudgetSnapshot()).details().isEmpty());
+	}
 
 	private record ContractSnapshot(BigDecimal targetProfitRate, List<ContractItem> items) { }
 	private record BudgetSnapshot(List<BudgetDetail> details) { }

@@ -1,4 +1,5 @@
-import { Download, Plus, Save, Trash2, Upload } from 'lucide-react'
+import { CheckCircle2, Download, Plus, Save, Trash2, Upload } from 'lucide-react'
+import { useState } from 'react'
 import { MetricPanel } from '../../components/ui/Metrics'
 import { MoneyInput } from '../../components/ui/MoneyInput'
 import { apiUrl } from '../../lib/api-client'
@@ -28,7 +29,7 @@ export function ContractManagementPanel({
   selectedFileType: string
   setTargetProfitRate: (value: string) => void
   setSelectedFileType: (value: string) => void
-  saveCustomerContract: () => void
+  saveCustomerContract: () => Promise<boolean>
   openChangeManagement: () => void
   uploadContractFile: (file: File | null) => void
   deleteContractFile: (fileId: string) => void
@@ -36,6 +37,23 @@ export function ContractManagementPanel({
   addContractItem: () => void
   removeContractItem: (index: number) => void
 }) {
+  const [isSaving, setIsSaving] = useState(false)
+  const [saveNotice, setSaveNotice] = useState<string | null>(null)
+
+  async function handleSaveCustomerContract() {
+    if (isSaving) return
+
+    setIsSaving(true)
+    setSaveNotice(null)
+    try {
+      if (await saveCustomerContract()) {
+        setSaveNotice('계약 정보가 저장되었습니다.')
+      }
+    } finally {
+      setIsSaving(false)
+    }
+  }
+
   return (
     <div>
       <div className="flex flex-col gap-4 border-b border-slate-200 pb-4 lg:flex-row lg:items-center lg:justify-between">
@@ -53,14 +71,22 @@ export function ContractManagementPanel({
           </button>
           <button
             type="button"
-            onClick={saveCustomerContract}
-            className="inline-flex items-center justify-center gap-2 rounded-md bg-slate-900 px-4 py-2 text-sm font-semibold text-white hover:bg-slate-800"
+            onClick={() => void handleSaveCustomerContract()}
+            disabled={isSaving}
+            className="inline-flex items-center justify-center gap-2 rounded-md bg-slate-900 px-4 py-2 text-sm font-semibold text-white hover:bg-slate-800 disabled:cursor-wait disabled:opacity-70"
           >
             <Save className="h-4 w-4" aria-hidden="true" />
             계약 저장
           </button>
         </div>
       </div>
+
+      {saveNotice && (
+        <div className="mt-4 flex items-center gap-2 rounded-md border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm font-medium text-emerald-800" role="status">
+          <CheckCircle2 className="h-4 w-4 shrink-0" aria-hidden="true" />
+          <p>{saveNotice}</p>
+        </div>
+      )}
 
       <div className="grid gap-4 border-b border-slate-200 py-5 lg:grid-cols-[260px_1fr_1fr]">
         <label className="block text-sm font-semibold text-slate-700">
@@ -105,7 +131,6 @@ export function ContractManagementPanel({
                 <tr key={item.item_id ?? index}>
                   <td className="px-3 py-3">
                     <input
-                      list="work-categories"
                       value={item.work_category}
                       onChange={(event) => updateContractItem(index, 'work_category', event.target.value)}
                       className="input"

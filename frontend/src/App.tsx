@@ -245,10 +245,11 @@ function App() {
     }
   }
 
-  async function saveCustomerContract() {
+  async function saveCustomerContract(): Promise<boolean> {
     if (!selectedProjectId) {
-      return
+      return false
     }
+    setError(null)
     const payload = {
       target_profit_rate: Number(targetProfitRate || 0),
       items: contractItems
@@ -262,11 +263,17 @@ function App() {
         })),
     }
 
-    const response = await contractApi.save(selectedProjectId, payload)
+    let response: Response
+    try {
+      response = await contractApi.save(selectedProjectId, payload)
+    } catch (err) {
+      setError(err instanceof Error ? err.message : '고객 계약을 저장하지 못했습니다.')
+      return false
+    }
 
     if (!response.ok) {
       setError(`고객 계약 저장 실패: ${response.status}`)
-      return
+      return false
     }
 
     const data: CustomerContract = await response.json()
@@ -281,6 +288,7 @@ function App() {
       }
       await loadSettlement(selectedProjectId)
     }
+    return true
   }
 
   async function uploadContractFile(file: File | null) {
@@ -335,9 +343,11 @@ function App() {
       }
       setExecutionBudget(data)
       setExecutionDetails(data.details.length > 0 ? data.details : [newExecutionBudgetDetail(data.project_code)])
-      const eligibleItems = data.summary_by_item.filter((item) => item.approval_status === 'APPROVED' && (eligibleItemIds === null || eligibleItemIds.includes(item.budget_item_id)))
+      const eligibleItems = data.summary_by_item.filter((item) => item.approval_status === 'APPROVED' && item.procurement_required && (eligibleItemIds === null || eligibleItemIds.includes(item.budget_item_id)))
       if (eligibleItems.length > 0) {
         setSelectedExecutionItemId((current) => eligibleItems.some((item) => item.budget_item_id === current) ? current : eligibleItems[0].budget_item_id)
+      } else {
+        setSelectedExecutionItemId('')
       }
       setError(null)
     } catch (err) {
@@ -355,7 +365,7 @@ function App() {
         .map((detail) => ({
           budget_item_id: detail.budget_item_id,
           category_name: detail.category_name,
-          item_name: detail.item_name,
+          item_name: detail.category_name,
           cost_type: detail.cost_type,
           vendor_description: detail.vendor_description ?? '',
           unit: detail.unit ?? '',
@@ -468,6 +478,9 @@ function App() {
           const next = { ...detail, [field]: toNumber(value) }
           next.amount = (next.quantity || 0) * (next.unit_price || 0)
           return next
+        }
+        if (field === 'category_name') {
+          return { ...detail, category_name: value, item_name: value }
         }
         return { ...detail, [field]: value }
       }),
@@ -663,9 +676,9 @@ function App() {
     }
   }
 
-  async function completeSettlement() {
+  async function requestSettlementApproval() {
     if (!selectedProjectId) return
-    const response = await settlementApi.complete(selectedProjectId, {
+    const response = await settlementApi.requestApproval(selectedProjectId, {
       uncollected_receivable: toNumber(settlementForm.uncollected_receivable),
       settlement_expense: toNumber(settlementForm.settlement_expense),
       settlement_tax: toNumber(settlementForm.settlement_tax),
@@ -676,11 +689,12 @@ function App() {
     })
     if (!response.ok) {
       const message = await response.text()
-      setError(message || `준공정산 완료 처리 실패: ${response.status}`)
+      setError(message || `준공정산 결재요청 실패: ${response.status}`)
       return
     }
     setSettlement(await response.json())
     await refreshProjects(keyword)
+    await loadApprovals()
     const summaryResponse = await projectApi.integratedSummary(selectedProjectId)
     if (summaryResponse.ok) {
       setSummary(await summaryResponse.json())
@@ -698,6 +712,18 @@ function App() {
     setProgressPayment(data)
     setClaimForm({ degree: '1', claim_amount: '0' })
     await loadSettlement(selectedProjectId)
+  }
+
+  async function deleteProgressClaim(claimId: string) {
+    if (!selectedProjectId || !window.confirm('결재 대기 또는 반려된 기성 건을 삭제하시겠습니까? 연결된 결재 요청도 함께 삭제됩니다.')) return
+    const response = await paymentApi.deleteClaim(selectedProjectId, claimId)
+    if (!response.ok) {
+      setError(`기성 삭제 실패: ${response.status}`)
+      return
+    }
+    const data: ProgressPaymentResponse = await response.json()
+    setProgressPayment(data)
+    await Promise.all([loadSettlement(selectedProjectId), loadApprovals()])
   }
 
   async function requestPaymentApprovals() {
@@ -771,7 +797,8 @@ function App() {
         item_name: detail.item_name,
 		approval_status: executionBudget?.approval_status ?? 'DRAFT',
 		purchase_order_status: 'NOT_REQUESTED',
-        rolled_up_amount: 0,
+		procurement_required: detail.cost_type !== '현장경비',
+		rolled_up_amount: 0,
       }
       current.category_name = detail.category_name
       current.item_name = detail.item_name
@@ -965,6 +992,7 @@ function App() {
                     selectedPaymentPoIds={selectedPaymentPoIds}
                     setSelectedPaymentPoIds={setSelectedPaymentPoIds}
                     createProgressClaim={createProgressClaim}
+                    deleteProgressClaim={deleteProgressClaim}
                     requestPaymentApprovals={requestPaymentApprovals}
                   />
                 )}
@@ -973,7 +1001,7 @@ function App() {
                     settlement={settlement}
                     form={settlementForm}
                     setForm={setSettlementForm}
-                    completeSettlement={completeSettlement}
+                    requestSettlementApproval={requestSettlementApproval}
                   />
                 )}
                 {activeTab === '공종별 흐름 추적' && <CostBreakdownTable rows={summary.cost_breakdown} />}

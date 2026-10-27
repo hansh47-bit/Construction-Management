@@ -12,6 +12,7 @@ export function ProgressPaymentPanel({
   selectedPaymentPoIds,
   setSelectedPaymentPoIds,
   createProgressClaim,
+  deleteProgressClaim,
   requestPaymentApprovals,
 }: {
   progressPayment: ProgressPaymentResponse
@@ -22,6 +23,7 @@ export function ProgressPaymentPanel({
   selectedPaymentPoIds: string[]
   setSelectedPaymentPoIds: (poIds: string[]) => void
   createProgressClaim: () => void
+  deleteProgressClaim: (claimId: string) => void
   requestPaymentApprovals: () => void
 }) {
   const selectedPo = progressPayment.purchaseOrders.find((po) => po.po_id === selectedPoId) ?? progressPayment.purchaseOrders[0]
@@ -177,7 +179,14 @@ export function ProgressPaymentPanel({
                   <td className="px-3 py-3">{formatWorkflowStatus(claim.approval_status)}</td>
                   <td className="px-3 py-3"><span className={`rounded-full px-2.5 py-1 text-xs font-semibold ${claim.payment_state === 'PAID' ? 'bg-cyan-100 text-cyan-800' : claim.payment_state === 'WAITING_FOR_PAYMENT' ? 'bg-amber-100 text-amber-800' : 'bg-slate-100 text-slate-700'}`}>{formatWorkflowStatus(claim.payment_state)}</span></td>
                   <td className="px-3 py-3">{formatWon(claim.paid_total)}</td>
-                  <td className="px-3 py-3">{formatWon(claim.remaining_payable)}</td>
+                  <td className="px-3 py-3">
+                    <div className="flex items-center gap-2">
+                      <span>{formatWon(claim.remaining_payable)}</span>
+                      {(claim.approval_status === 'REQUESTED' || claim.approval_status === 'REJECTED') && (
+                        <button type="button" onClick={() => deleteProgressClaim(claim.claim_id)} className="rounded border border-rose-300 px-2 py-1 text-xs font-semibold text-rose-700 hover:bg-rose-50">삭제</button>
+                      )}
+                    </div>
+                  </td>
                   <td className="px-3 py-3 text-xs font-semibold text-slate-600">{claim.approval_status === 'REQUESTED' ? '통합결재함 승인 대기' : claim.approval_status === 'REJECTED' ? '통합결재함 반려' : '-'}</td>
                 </tr>
               ))}

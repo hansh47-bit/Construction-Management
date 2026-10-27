@@ -8,12 +8,14 @@ import com.construction.management.project.domain.ApprovalStatus;
 import com.construction.management.project.domain.BudgetChange;
 import com.construction.management.project.domain.Project;
 import com.construction.management.project.domain.ProjectExecutionBudgetItem;
+import com.construction.management.project.domain.ProjectExecutionBudgetDetail;
 import com.construction.management.project.domain.ProjectRevision;
 import com.construction.management.project.domain.PurchaseOrder;
 import com.construction.management.project.domain.VendorComparison;
 import com.construction.management.project.repository.PoRequisitionRepository;
 import com.construction.management.project.repository.BudgetChangeRepository;
 import com.construction.management.project.repository.ProjectExecutionBudgetItemRepository;
+import com.construction.management.project.repository.ProjectExecutionBudgetDetailRepository;
 import com.construction.management.project.repository.ProjectRepository;
 import com.construction.management.project.repository.ProjectRevisionRepository;
 import com.construction.management.project.repository.PurchaseOrderRepository;
@@ -33,6 +35,7 @@ public class VendorComparisonService {
 	private final ProjectRepository projectRepository;
 	private final ProjectRevisionRepository revisionRepository;
 	private final ProjectExecutionBudgetItemRepository budgetItemRepository;
+	private final ProjectExecutionBudgetDetailRepository budgetDetailRepository;
 	private final VendorComparisonRepository comparisonRepository;
 	private final PoRequisitionRepository requisitionRepository;
 	private final PurchaseOrderRepository purchaseOrderRepository;
@@ -40,11 +43,13 @@ public class VendorComparisonService {
 	private final ApprovalService approvalService;
 	private final BudgetChangeRepository budgetChangeRepository;
 	private final VendorComparisonAttachmentService attachmentService;
+	private final ProjectRevisionService projectRevisionService;
 
-	public VendorComparisonService(ProjectRepository projectRepository, ProjectRevisionRepository revisionRepository, ProjectExecutionBudgetItemRepository budgetItemRepository, VendorComparisonRepository comparisonRepository, PoRequisitionRepository requisitionRepository, PurchaseOrderRepository purchaseOrderRepository, ProjectSettlementService projectSettlementService, ApprovalService approvalService, BudgetChangeRepository budgetChangeRepository, VendorComparisonAttachmentService attachmentService) {
+	public VendorComparisonService(ProjectRepository projectRepository, ProjectRevisionRepository revisionRepository, ProjectExecutionBudgetItemRepository budgetItemRepository, ProjectExecutionBudgetDetailRepository budgetDetailRepository, VendorComparisonRepository comparisonRepository, PoRequisitionRepository requisitionRepository, PurchaseOrderRepository purchaseOrderRepository, ProjectSettlementService projectSettlementService, ApprovalService approvalService, BudgetChangeRepository budgetChangeRepository, VendorComparisonAttachmentService attachmentService, ProjectRevisionService projectRevisionService) {
 		this.projectRepository = projectRepository;
 		this.revisionRepository = revisionRepository;
 		this.budgetItemRepository = budgetItemRepository;
+		this.budgetDetailRepository = budgetDetailRepository;
 		this.comparisonRepository = comparisonRepository;
 		this.requisitionRepository = requisitionRepository;
 		this.purchaseOrderRepository = purchaseOrderRepository;
@@ -52,6 +57,7 @@ public class VendorComparisonService {
 		this.approvalService = approvalService;
 		this.budgetChangeRepository = budgetChangeRepository;
 		this.attachmentService = attachmentService;
+		this.projectRevisionService = projectRevisionService;
 	}
 
 	@Transactional(readOnly = true)
@@ -75,6 +81,7 @@ public class VendorComparisonService {
 		if (!item.isApproved()) {
 			throw new IllegalStateException("실행예산 승인 후 발주품의를 요청할 수 있습니다.");
 		}
+		assertProcurementRequired(projectId, itemId);
 		long selectedCount = request.comparisons().stream().filter(VendorComparisonRequest.Item::selected).count();
 		if (selectedCount > 1) {
 			throw new IllegalArgumentException("동일 실행항목ID에는 하나의 업체만 선정할 수 있습니다.");
@@ -148,6 +155,7 @@ public class VendorComparisonService {
 		if (!item.isApproved()) {
 			throw new IllegalStateException("실행예산 승인 후 발주품의를 요청할 수 있습니다.");
 		}
+		assertProcurementRequired(projectId, itemId);
 		VendorComparison selected = comparisonRepository.findByProjectIdAndExecutionItemIdAndRevisionIdAndSelectedTrue(projectId, itemId, revisionId)
 				.orElseThrow(() -> new ResponseStatusException(HttpStatus.CONFLICT, "선정 업체를 저장한 후 발주품의를 요청할 수 있습니다."));
 		if (!StringUtils.hasText(selected.getSelectionReason())) {
@@ -159,7 +167,7 @@ public class VendorComparisonService {
 		if (!requisitionRepository.findByProjectIdAndExecutionItemIdAndRevisionIdAndApprovalStatus(projectId, itemId, revisionId, "APPROVED").isEmpty()) {
 			throw new IllegalArgumentException("이미 승인된 발주품의가 있습니다.");
 		}
-		BigDecimal approvedBudget = currentBudgetAmount(item);
+		BigDecimal approvedBudget = currentBudgetAmount(projectId, item);
 		BigDecimal variance = selected.getQuotedAmount().subtract(approvedBudget);
 		PoRequisition requisition = new PoRequisition(
 				"REQ-PO-" + UUID.randomUUID().toString().substring(0, 8),
@@ -180,7 +188,7 @@ public class VendorComparisonService {
 
 	private VendorComparisonResponse toResponse(Project project, ProjectExecutionBudgetItem item) {
 		String budgetItemId = ProjectExecutionBudgetItem.budgetItemId(project.getProjectId(), item.getItemId());
-		BigDecimal budgetAmount = currentBudgetAmount(item);
+		BigDecimal budgetAmount = currentBudgetAmount(project.getProjectId(), item);
 		return new VendorComparisonResponse(
 				project.getProjectId(),
 				project.getProjectCode(),
@@ -212,7 +220,7 @@ public class VendorComparisonService {
 
 	private PurchaseOrderDraftResponse toDraft(Project project, ProjectExecutionBudgetItem item, VendorComparison selected, PoRequisition requisition) {
 		String budgetItemId = ProjectExecutionBudgetItem.budgetItemId(project.getProjectId(), item.getItemId());
-		BigDecimal budgetAmount = currentBudgetAmount(item);
+		BigDecimal budgetAmount = currentBudgetAmount(project.getProjectId(), item);
 		BigDecimal variance = selected.getQuotedAmount().subtract(budgetAmount);
 		String varianceType = variance.signum() > 0 ? "OVER" : variance.signum() < 0 ? "SAVING" : "EVEN";
 		String color = variance.signum() > 0 ? "RED" : variance.signum() < 0 ? "BLUE" : "DARK";
@@ -250,10 +258,23 @@ public class VendorComparisonService {
 				.orElse(null);
 	}
 
-	private BigDecimal currentBudgetAmount(ProjectExecutionBudgetItem item) {
+	private BigDecimal currentBudgetAmount(String projectId, ProjectExecutionBudgetItem item) {
+		String budgetItemId = ProjectExecutionBudgetItem.budgetItemId(projectId, item.getItemId());
+		var revisionAmount = projectRevisionService.latestApprovedBudgetItemAmount(projectId, budgetItemId);
+		if (revisionAmount.isPresent()) {
+			return revisionAmount.get();
+		}
 		BigDecimal original = item.getApprovedBudgetAmount() == null ? item.getBudgetAmount() : item.getApprovedBudgetAmount();
 		BigDecimal changes = budgetChangeRepository.findByBudgetIdInAndApprovalStatus(List.of(item.getItemId()), ApprovalStatus.APPROVED).stream()
 				.map(BudgetChange::getChangeAmount).reduce(BigDecimal.ZERO, BigDecimal::add);
 		return original.add(changes);
+	}
+
+	private void assertProcurementRequired(String projectId, String itemId) {
+		List<ProjectExecutionBudgetDetail> details = budgetDetailRepository.findByProjectIdAndBudgetItemIdOrderByDetailIdAsc(projectId, itemId);
+		boolean siteExpenseOnly = !details.isEmpty() && details.stream().allMatch(detail -> "현장경비".equals(detail.getCostType()));
+		if (siteExpenseOnly) {
+			throw new IllegalStateException("현장경비 실행항목은 업체 비교견적 및 발주 대상이 아닙니다. 준공정산의 준공경비에서 처리해 주세요.");
+		}
 	}
 }

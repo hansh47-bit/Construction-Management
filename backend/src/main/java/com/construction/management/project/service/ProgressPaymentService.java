@@ -15,6 +15,7 @@ import com.construction.management.project.domain.ProjectExecutionBudgetItem;
 import com.construction.management.project.domain.ProjectRevision;
 import com.construction.management.project.domain.PurchaseOrder;
 import com.construction.management.project.repository.ActualPaymentRepository;
+import com.construction.management.project.repository.ApprovalRepository;
 import com.construction.management.project.repository.PoChangeRepository;
 import com.construction.management.project.repository.PaymentRequestRepository;
 import com.construction.management.project.repository.ProgressClaimRepository;
@@ -45,8 +46,9 @@ public class ProgressPaymentService {
 	private final PaymentRequestRepository paymentRequestRepository;
 	private final ProjectExecutionBudgetItemRepository budgetItemRepository;
 	private final ApprovalService approvalService;
+	private final ApprovalRepository approvalRepository;
 
-	public ProgressPaymentService(ProjectRepository projectRepository, ProjectRevisionRepository revisionRepository, PurchaseOrderRepository purchaseOrderRepository, PoChangeRepository poChangeRepository, ProgressClaimRepository progressClaimRepository, ActualPaymentRepository actualPaymentRepository, ProjectSettlementService projectSettlementService, PaymentRequestRepository paymentRequestRepository, ProjectExecutionBudgetItemRepository budgetItemRepository, ApprovalService approvalService) {
+	public ProgressPaymentService(ProjectRepository projectRepository, ProjectRevisionRepository revisionRepository, PurchaseOrderRepository purchaseOrderRepository, PoChangeRepository poChangeRepository, ProgressClaimRepository progressClaimRepository, ActualPaymentRepository actualPaymentRepository, ProjectSettlementService projectSettlementService, PaymentRequestRepository paymentRequestRepository, ProjectExecutionBudgetItemRepository budgetItemRepository, ApprovalService approvalService, ApprovalRepository approvalRepository) {
 		this.projectRepository = projectRepository;
 		this.revisionRepository = revisionRepository;
 		this.purchaseOrderRepository = purchaseOrderRepository;
@@ -57,6 +59,7 @@ public class ProgressPaymentService {
 		this.paymentRequestRepository = paymentRequestRepository;
 		this.budgetItemRepository = budgetItemRepository;
 		this.approvalService = approvalService;
+		this.approvalRepository = approvalRepository;
 	}
 
 	@Transactional
@@ -102,6 +105,31 @@ public class ProgressPaymentService {
 			throw new IllegalArgumentException("실제 지급 금액이 승인 기성금액을 초과합니다.");
 		}
 		actualPaymentRepository.save(new ActualPayment("PAY-" + UUID.randomUUID().toString().substring(0, 8), claimId, paidAmount, request.paidDate(), request.accountInfo(), request.receiptLink()));
+		return toResponse(project);
+	}
+
+	@Transactional
+	public ProgressPaymentResponse deleteUnapprovedClaim(String projectId, String claimId) {
+		projectSettlementService.assertNotSettled(projectId);
+		Project project = getProject(projectId);
+		ProgressClaim claim = progressClaimRepository.findById(claimId)
+				.orElseThrow(() -> new EntityNotFoundException("Progress claim not found: " + claimId));
+		getPo(projectId, claim.getPoId());
+		if (claim.getApprovalStatus() != ApprovalStatus.REQUESTED && claim.getApprovalStatus() != ApprovalStatus.REJECTED) {
+			throw new IllegalStateException("Only unapproved or rejected progress claims can be deleted.");
+		}
+		if (!actualPaymentRepository.findByClaimId(claimId).isEmpty()) {
+			throw new IllegalStateException("A progress claim with payment records cannot be deleted.");
+		}
+		if (StringUtils.hasText(claim.getApprovalId())) {
+			approvalRepository.findById(claim.getApprovalId())
+					.filter(approval -> projectId.equals(approval.getProjectId())
+							&& ApprovalService.TYPE_PROGRESS_CLAIM.equals(approval.getApprovalType())
+							&& claimId.equals(approval.getTargetId())
+							&& (approval.getStatus() == ApprovalStatus.REQUESTED || approval.getStatus() == ApprovalStatus.REJECTED))
+					.ifPresent(approvalRepository::delete);
+		}
+		progressClaimRepository.delete(claim);
 		return toResponse(project);
 	}
 

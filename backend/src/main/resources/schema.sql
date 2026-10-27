@@ -13,6 +13,9 @@ ALTER TABLE IF EXISTS project_execution_budget_items
 ALTER TABLE IF EXISTS project_execution_budget_items
 	ADD COLUMN IF NOT EXISTS approval_comment VARCHAR(1000);
 
+ALTER TABLE IF EXISTS project_revisions
+	ADD COLUMN IF NOT EXISTS execution_budget_rewrite_available BOOLEAN DEFAULT FALSE NOT NULL;
+
 ALTER TABLE IF EXISTS approvals
 	ADD COLUMN IF NOT EXISTS cancelled_by VARCHAR(255);
 
@@ -97,6 +100,38 @@ CREATE TABLE IF NOT EXISTS change_orders (
 	status VARCHAR(32) NOT NULL,
 	created_at TIMESTAMP NOT NULL
 );
+
+-- Change-order revision flags were introduced after existing change orders had
+-- already been stored. Backfill those rows before Hibernate maps them to
+-- primitive booleans; old change orders represent the full change scope.
+ALTER TABLE IF EXISTS change_orders
+	ADD COLUMN IF NOT EXISTS revision_number INTEGER;
+
+ALTER TABLE IF EXISTS change_orders
+	ADD COLUMN IF NOT EXISTS contract_change_enabled BOOLEAN DEFAULT TRUE;
+
+ALTER TABLE IF EXISTS change_orders
+	ADD COLUMN IF NOT EXISTS budget_change_enabled BOOLEAN DEFAULT TRUE;
+
+UPDATE change_orders
+	SET contract_change_enabled = TRUE
+	WHERE contract_change_enabled IS NULL;
+
+UPDATE change_orders
+	SET budget_change_enabled = TRUE
+	WHERE budget_change_enabled IS NULL;
+
+ALTER TABLE IF EXISTS change_orders
+	ALTER COLUMN contract_change_enabled SET DEFAULT TRUE;
+
+ALTER TABLE IF EXISTS change_orders
+	ALTER COLUMN budget_change_enabled SET DEFAULT TRUE;
+
+ALTER TABLE IF EXISTS change_orders
+	ALTER COLUMN contract_change_enabled SET NOT NULL;
+
+ALTER TABLE IF EXISTS change_orders
+	ALTER COLUMN budget_change_enabled SET NOT NULL;
 
 CREATE TABLE IF NOT EXISTS execution_budget_approval_attachments (
 	attachment_id VARCHAR(64) PRIMARY KEY,
