@@ -1,10 +1,17 @@
-import { CheckCircle2, Download, Plus, Save, Trash2, Upload } from 'lucide-react'
+import { CheckCircle2, Download, FileSpreadsheet, FileText, Plus, Save, Trash2, Upload } from 'lucide-react'
 import { useState } from 'react'
 import { MetricPanel } from '../../components/ui/Metrics'
 import { MoneyInput } from '../../components/ui/MoneyInput'
 import { apiUrl } from '../../lib/api-client'
 import { formatWon } from '../../lib/format'
 import type { CustomerContract, CustomerContractItem } from '../../types/domain'
+
+function ContractFileIcon({ fileName }: { fileName: string }) {
+  const extension = fileName.split('.').pop()?.toLowerCase()
+  if (extension === 'xlsx' || extension === 'xls' || extension === 'csv') return <span className="flex h-9 w-9 items-center justify-center rounded-lg bg-emerald-50 text-emerald-600"><FileSpreadsheet className="h-5 w-5" /></span>
+  if (extension === 'pdf') return <span className="flex h-9 w-9 items-center justify-center rounded-lg bg-rose-50 text-rose-600"><FileText className="h-5 w-5" /></span>
+  return <span className="flex h-9 w-9 items-center justify-center rounded-lg bg-blue-50 text-blue-600"><FileText className="h-5 w-5" /></span>
+}
 
 export function ContractManagementPanel({
   contract,
@@ -230,10 +237,11 @@ export function ContractManagementPanel({
           ) : (
             contract.files.map((file) => (
               <div key={file.file_id} className="flex items-center justify-between gap-3 px-4 py-3 text-sm hover:bg-slate-50">
-                <span className="min-w-0">
-                  <span className="font-semibold text-slate-900">{file.file_name}</span>
-                  <span className="ml-2 rounded-full bg-slate-100 px-2 py-0.5 text-xs font-semibold text-slate-600">
-                    {file.file_type}
+                <span className="flex min-w-0 items-center gap-3">
+                  <ContractFileIcon fileName={file.file_name} />
+                  <span className="min-w-0">
+                    <span className="block truncate font-semibold text-slate-900">{file.file_name}</span>
+                    <span className="mt-1 inline-block rounded-full bg-slate-100 px-2 py-0.5 text-xs font-semibold text-slate-600">{file.file_type}</span>
                   </span>
                 </span>
                 <span className="flex shrink-0 items-center gap-1">

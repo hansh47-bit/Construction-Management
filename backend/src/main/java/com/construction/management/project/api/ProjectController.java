@@ -16,8 +16,11 @@ import com.construction.management.project.service.PurchaseOrderService;
 import com.construction.management.project.service.PaymentRequestService;
 import com.construction.management.project.service.VendorComparisonService;
 import com.construction.management.project.service.VendorComparisonAttachmentService;
+import com.construction.management.project.service.DailyLogService;
+import com.construction.management.project.service.MeetingMinutesService;
 import jakarta.validation.Valid;
 import java.nio.charset.StandardCharsets;
+import java.time.LocalDate;
 import java.util.List;
 import org.springframework.http.CacheControl;
 import org.springframework.core.io.Resource;
@@ -56,6 +59,8 @@ public class ProjectController {
 	private final ApprovalService approvalService;
 	private final ExecutionBudgetApprovalAttachmentService executionBudgetApprovalAttachmentService;
 	private final VendorComparisonAttachmentService vendorComparisonAttachmentService;
+	private final DailyLogService dailyLogService;
+	private final MeetingMinutesService meetingMinutesService;
 
 	public ProjectController(
 			ProjectService projectService,
@@ -70,7 +75,9 @@ public class ProjectController {
 			PaymentRequestService paymentRequestService,
 			ApprovalService approvalService,
 			ExecutionBudgetApprovalAttachmentService executionBudgetApprovalAttachmentService,
-			VendorComparisonAttachmentService vendorComparisonAttachmentService
+			VendorComparisonAttachmentService vendorComparisonAttachmentService,
+			DailyLogService dailyLogService,
+			MeetingMinutesService meetingMinutesService
 	) {
 		this.projectService = projectService;
 		this.projectRevisionService = projectRevisionService;
@@ -85,6 +92,8 @@ public class ProjectController {
 		this.approvalService = approvalService;
 		this.executionBudgetApprovalAttachmentService = executionBudgetApprovalAttachmentService;
 		this.vendorComparisonAttachmentService = vendorComparisonAttachmentService;
+		this.dailyLogService = dailyLogService;
+		this.meetingMinutesService = meetingMinutesService;
 	}
 
 	@PostMapping
@@ -103,6 +112,80 @@ public class ProjectController {
 	public void delete(@PathVariable("projectId") String projectId) {
 		projectService.delete(projectId);
 	}
+
+	@GetMapping("/{projectId}/daily-logs")
+	public List<DailyLogResponse> getDailyLogs(
+			@PathVariable("projectId") String projectId,
+			@RequestParam(name = "from", required = false) LocalDate from,
+			@RequestParam(name = "to", required = false) LocalDate to
+	) {
+		return dailyLogService.list(projectId, from, to);
+	}
+
+	@GetMapping("/{projectId}/daily-logs/{dailyLogId}")
+	public DailyLogResponse getDailyLog(@PathVariable("projectId") String projectId, @PathVariable("dailyLogId") String dailyLogId) {
+		return dailyLogService.get(projectId, dailyLogId);
+	}
+
+	@PostMapping("/{projectId}/daily-logs")
+	@ResponseStatus(HttpStatus.CREATED)
+	public DailyLogResponse createDailyLog(@PathVariable("projectId") String projectId, @Valid @RequestBody DailyLogRequest request) {
+		return dailyLogService.create(projectId, request);
+	}
+
+	@PutMapping("/{projectId}/daily-logs/{dailyLogId}")
+	public DailyLogResponse updateDailyLog(@PathVariable("projectId") String projectId, @PathVariable("dailyLogId") String dailyLogId, @Valid @RequestBody DailyLogRequest request) {
+		return dailyLogService.update(projectId, dailyLogId, request);
+	}
+
+	@PostMapping(path = "/{projectId}/daily-logs/{dailyLogId}/photos", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
+	public DailyLogResponse uploadDailyLogPhoto(
+			@PathVariable("projectId") String projectId, @PathVariable("dailyLogId") String dailyLogId,
+			@RequestParam("file") MultipartFile file, @RequestParam(name = "phase", defaultValue = "DURING") String phase,
+			@RequestParam(name = "caption", required = false) String caption, @RequestParam(name = "uploadedBy", required = false) String uploadedBy
+	) { return dailyLogService.uploadPhoto(projectId, dailyLogId, phase, caption, file, uploadedBy); }
+
+	@GetMapping("/{projectId}/daily-logs/{dailyLogId}/photos/{photoId}")
+	public ResponseEntity<Resource> downloadDailyLogPhoto(@PathVariable("projectId") String projectId, @PathVariable("dailyLogId") String dailyLogId, @PathVariable("photoId") String photoId) {
+		Resource resource = dailyLogService.loadPhoto(projectId, dailyLogId, photoId);
+		return ResponseEntity.ok().cacheControl(CacheControl.noStore().mustRevalidate()).contentType(org.springframework.http.MediaTypeFactory.getMediaType(resource.getFilename()).orElse(MediaType.APPLICATION_OCTET_STREAM)).body(resource);
+	}
+
+	@DeleteMapping("/{projectId}/daily-logs/{dailyLogId}/photos/{photoId}")
+	public DailyLogResponse deleteDailyLogPhoto(@PathVariable("projectId") String projectId, @PathVariable("dailyLogId") String dailyLogId, @PathVariable("photoId") String photoId) { return dailyLogService.deletePhoto(projectId, dailyLogId, photoId); }
+
+	@DeleteMapping("/{projectId}/daily-logs/{dailyLogId}")
+	@ResponseStatus(HttpStatus.NO_CONTENT)
+	public void deleteDailyLog(@PathVariable("projectId") String projectId, @PathVariable("dailyLogId") String dailyLogId) { dailyLogService.delete(projectId, dailyLogId); }
+
+	@GetMapping("/{projectId}/meeting-minutes")
+	public List<MeetingMinutesResponse> getMeetingMinutes(@PathVariable("projectId") String projectId) { return meetingMinutesService.list(projectId); }
+
+	@GetMapping("/{projectId}/meeting-minutes/{meetingId}")
+	public MeetingMinutesResponse getMeetingMinutes(@PathVariable("projectId") String projectId, @PathVariable("meetingId") String meetingId) { return meetingMinutesService.get(projectId, meetingId); }
+
+	@PostMapping("/{projectId}/meeting-minutes")
+	@ResponseStatus(HttpStatus.CREATED)
+	public MeetingMinutesResponse createMeetingMinutes(@PathVariable("projectId") String projectId, @Valid @RequestBody MeetingMinutesRequest request) { return meetingMinutesService.create(projectId, request); }
+
+	@PutMapping("/{projectId}/meeting-minutes/{meetingId}")
+	public MeetingMinutesResponse updateMeetingMinutes(@PathVariable("projectId") String projectId, @PathVariable("meetingId") String meetingId, @Valid @RequestBody MeetingMinutesRequest request) { return meetingMinutesService.update(projectId, meetingId, request); }
+
+	@PostMapping(path = "/{projectId}/meeting-minutes/{meetingId}/attachments", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
+	public MeetingMinutesResponse uploadMeetingAttachment(@PathVariable("projectId") String projectId, @PathVariable("meetingId") String meetingId, @RequestParam("file") MultipartFile file, @RequestParam(name = "uploadedBy", required = false) String uploadedBy) { return meetingMinutesService.uploadAttachment(projectId, meetingId, file, uploadedBy); }
+
+	@GetMapping("/{projectId}/meeting-minutes/{meetingId}/attachments/{attachmentId}")
+	public ResponseEntity<Resource> downloadMeetingAttachment(@PathVariable("projectId") String projectId, @PathVariable("meetingId") String meetingId, @PathVariable("attachmentId") String attachmentId) {
+		Resource resource = meetingMinutesService.loadAttachment(projectId, meetingId, attachmentId);
+		return ResponseEntity.ok().header(HttpHeaders.CONTENT_DISPOSITION, ContentDisposition.attachment().filename(resource.getFilename() == null ? "attachment" : resource.getFilename(), StandardCharsets.UTF_8).build().toString()).cacheControl(CacheControl.noStore().mustRevalidate()).contentType(org.springframework.http.MediaTypeFactory.getMediaType(resource.getFilename()).orElse(MediaType.APPLICATION_OCTET_STREAM)).body(resource);
+	}
+
+	@DeleteMapping("/{projectId}/meeting-minutes/{meetingId}/attachments/{attachmentId}")
+	public MeetingMinutesResponse deleteMeetingAttachment(@PathVariable("projectId") String projectId, @PathVariable("meetingId") String meetingId, @PathVariable("attachmentId") String attachmentId) { return meetingMinutesService.deleteAttachment(projectId, meetingId, attachmentId); }
+
+	@DeleteMapping("/{projectId}/meeting-minutes/{meetingId}")
+	@ResponseStatus(HttpStatus.NO_CONTENT)
+	public void deleteMeetingMinutes(@PathVariable("projectId") String projectId, @PathVariable("meetingId") String meetingId) { meetingMinutesService.delete(projectId, meetingId); }
 
 	@PostMapping("/{projectId}/start-construction")
 	public ProjectResponse startConstruction(@PathVariable("projectId") String projectId) {

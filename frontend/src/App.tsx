@@ -13,7 +13,6 @@ import { useProjects } from './features/projects/useProjects'
 import { ApprovalInboxPanel } from './features/approvals/ApprovalInboxPanel'
 import { RevisionManagementPanel } from './features/changes/RevisionManagementPanel'
 import { revisionApi } from './features/changes/revision-api'
-import { CostBreakdownTable } from './features/dashboard/CostBreakdownTable'
 import { ProjectOverview } from './features/dashboard/ProjectOverview'
 import { ExecutiveDashboard } from './features/dashboard/ExecutiveDashboard'
 import { ContractManagementPanel } from './features/contracts/ContractManagementPanel'
@@ -22,13 +21,15 @@ import { ProgressPaymentPanel } from './features/payments/ProgressPaymentPanel'
 import { PurchaseOrderHistoryPanel } from './features/procurement/PurchaseOrderHistoryPanel'
 import { VendorComparisonPanel } from './features/procurement/VendorComparisonPanel'
 import { SettlementPanel } from './features/settlement/SettlementPanel'
+import { DailyLogPanel } from './features/site-records/DailyLogPanel'
+import { MeetingMinutesPanel } from './features/site-records/MeetingMinutesPanel'
 import { toNumber } from './lib/format'
 import {
   AlertTriangle,
   FolderPlus,
 } from 'lucide-react'
 
-const tabs = ['고객 견적·계약 관리', '세부실행예산', '업체 비교견적', '통합결재함', '공종별 흐름 추적', '계약/발주 이력', '기성 및 지급 현황', '준공정산', '증빙 및 파일']
+const tabs = ['고객 견적·계약 관리', '세부실행예산', '업체 비교견적', '통합결재함', '계약/발주 이력', '기성 및 지급 현황', '현장 작업일지', '현장 회의록', '준공정산']
 const projectTabs = tabs.filter((tab) => tab !== '통합결재함')
 
 function newContractItem(): CustomerContractItem {
@@ -90,6 +91,7 @@ function App() {
   const [purchaseOrderHistory, setPurchaseOrderHistory] = useState<PurchaseOrderHistoryItem[]>([])
   const [purchaseOrderHistoryRevision, setPurchaseOrderHistoryRevision] = useState<number | undefined>()
   const [approvals, setApprovals] = useState<ApprovalItem[]>([])
+  const [pendingApprovalCount, setPendingApprovalCount] = useState(0)
   const [selectedApproval, setSelectedApproval] = useState<ApprovalItem | null>(null)
   const [approvalStatusFilter, setApprovalStatusFilter] = useState('REQUESTED')
   const [approvalTypeFilter, setApprovalTypeFilter] = useState('')
@@ -183,6 +185,10 @@ function App() {
     }
     loadApprovals()
   }, [approvalStatusFilter, approvalTypeFilter, activePage, selectedProjectId])
+
+  useEffect(() => {
+    void loadPendingApprovalCount()
+  }, [])
 
   const selectedProject = useMemo(
     () => projects.find((project) => project.project_id === selectedProjectId) ?? summary?.project_info,
@@ -407,6 +413,7 @@ function App() {
   }
 
   async function loadApprovals() {
+    void loadPendingApprovalCount()
     if (!selectedProjectId && activePage !== 'approvals') return
     const params = new URLSearchParams()
     if (selectedProjectId && activePage !== 'approvals') params.set('projectId', selectedProjectId)
@@ -563,6 +570,17 @@ function App() {
     setVendorComparisons(data.comparisons.length > 0 ? data.comparisons : [newVendorComparison(selectedExecutionItemId, 'A')])
     await loadPurchaseOrderDraft(selectedProjectId, selectedExecutionItemId, false)
     return data
+  }
+
+  async function loadPendingApprovalCount() {
+    try {
+      const response = await approvalApi.list(new URLSearchParams({ status: 'REQUESTED' }))
+      if (!response.ok) return
+      const data: ApprovalItem[] = await response.json()
+      setPendingApprovalCount(data.length)
+    } catch {
+      // Navigation stays usable even when the notification count cannot be refreshed.
+    }
   }
 
   async function saveVendorComparisons() {
@@ -810,64 +828,34 @@ function App() {
 
   return (
     <main className="min-h-screen bg-[#f5f7fb] text-slate-900">
-      <div className="mx-auto flex w-full max-w-7xl flex-col gap-6 px-4 py-6 sm:px-6 lg:px-8">
-        <header className="flex flex-col gap-4 border-b border-slate-200 pb-5 lg:flex-row lg:items-end lg:justify-between">
-          <div>
-            <p className="text-sm font-semibold text-slate-500">Project Single View</p>
-            <h1 className="mt-2 text-3xl font-semibold tracking-normal text-slate-950">
-              {activePage === 'projects' ? '프로젝트 등록 및 통합현황' : activePage === 'executive' ? '경영진 대시보드' : activePage === 'approvals' ? '통합결재함' : '변경관리 이력'}
-            </h1>
-            <p className="mt-2 max-w-3xl text-sm leading-6 text-slate-600">
-              {activePage === 'projects'
-                ? '프로젝트를 선택하면 계약, 실행예산, 발주, 기성, 지급, 예상손익을 하나의 흐름으로 추적합니다.'
-                : activePage === 'executive'
-                  ? '프로젝트별 현재 계약·예산·발주·기성·지급과 대표 결재 대기 현황을 집계합니다.'
-                  : activePage === 'approvals'
-                  ? '모든 프로젝트의 실행예산 및 발주품의 결재를 한 곳에서 처리합니다.'
-                  : '선택한 프로젝트의 금액 변경 이력과 연결 영향을 확인합니다.'}
-            </p>
-            <div className="mt-4 flex flex-wrap gap-2">
-              <button
-                type="button"
-                onClick={() => setActivePage('executive')}
-                className={`rounded-md px-3 py-2 text-sm font-semibold ${activePage === 'executive' ? 'bg-slate-900 text-white' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'}`}
-              >
-                경영진 대시보드
-              </button>
-              <button
-                type="button"
-                onClick={() => setActivePage('projects')}
-                className={`rounded-md px-3 py-2 text-sm font-semibold ${activePage === 'projects' ? 'bg-slate-900 text-white' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'}`}
-              >
-                프로젝트 현황
-              </button>
-              <button
-                type="button"
-                onClick={() => setActivePage('approvals')}
-                className={`rounded-md px-3 py-2 text-sm font-semibold ${activePage === 'approvals' ? 'bg-slate-900 text-white' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'}`}
-              >
-                통합결재함
-              </button>
-              <button
-                type="button"
-                onClick={() => setActivePage('changes')}
-                className={`rounded-md px-3 py-2 text-sm font-semibold ${activePage === 'changes' ? 'bg-slate-900 text-white' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'}`}
-              >
-                변경관리 이력
-              </button>
+      <header className="sticky top-0 z-40 border-b border-slate-200 bg-white/95 shadow-sm backdrop-blur">
+        <div className="mx-auto w-full max-w-[1440px] px-4 sm:px-6 lg:px-8">
+          <div className="flex min-h-16 items-center justify-between gap-4">
+            <button type="button" onClick={() => setActivePage('projects')} className="text-left" aria-label="프로젝트 현황으로">
+              <p className="text-lg font-black tracking-tight text-slate-950">아이엔씨 <span className="text-blue-700">ERP</span></p>
+              <p className="text-[11px] font-medium text-slate-400">공사 통합관리</p>
+            </button>
+            <div className="flex items-center gap-3">
+              {activePage === 'projects' && <button type="button" onClick={() => setIsModalOpen(true)} className="inline-flex items-center justify-center gap-2 rounded-lg bg-blue-700 px-3.5 py-2 text-sm font-bold text-white shadow-sm hover:bg-blue-800"><FolderPlus className="h-4 w-4" aria-hidden="true" />프로젝트 등록</button>}
+              <span className="hidden rounded-full bg-blue-50 px-3 py-1.5 text-xs font-bold text-blue-700 sm:inline">대표이사</span>
             </div>
           </div>
-          {activePage === 'projects' && (
-            <button
-              type="button"
-              onClick={() => setIsModalOpen(true)}
-              className="inline-flex items-center justify-center gap-2 rounded-md bg-cyan-700 px-4 py-2.5 text-sm font-semibold text-white shadow-sm hover:bg-cyan-800"
-            >
-              <FolderPlus className="h-4 w-4" aria-hidden="true" />
-              프로젝트 등록
-            </button>
-          )}
-        </header>
+          <nav className="-mb-px flex items-end gap-1 overflow-x-auto" aria-label="최상위 메뉴">
+            {([
+              ['executive', '경영진 대시보드'],
+              ['projects', '프로젝트 현황'],
+              ['approvals', '통합결재함'],
+              ['changes', '변경관리 이력'],
+            ] as const).map(([page, label]) => (
+              <button key={page} type="button" onClick={() => setActivePage(page)} className={`relative shrink-0 border-b-2 px-4 py-3 text-sm font-bold transition ${activePage === page ? 'border-blue-600 text-blue-700' : 'border-transparent text-slate-500 hover:border-slate-300 hover:text-slate-800'}`}>
+                {label}{page === 'approvals' && pendingApprovalCount > 0 && <span className="ml-1.5 inline-flex min-w-5 items-center justify-center rounded-full bg-rose-500 px-1.5 py-0.5 text-[10px] font-black text-white">{pendingApprovalCount}</span>}
+              </button>
+            ))}
+          </nav>
+        </div>
+      </header>
+
+      <div className="mx-auto flex w-full max-w-[1440px] flex-col gap-6 px-4 py-6 sm:px-6 lg:px-8">
 
         {error && (
           <section className="flex items-start gap-3 rounded-md border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
@@ -907,22 +895,22 @@ function App() {
               onMoveToTab={moveToTab}
             />
 
-            <section ref={tabRef} className="rounded-md border border-slate-200 bg-white shadow-sm">
-              <div className="flex flex-wrap gap-2 border-b border-slate-200 px-4 py-3">
+            <section ref={tabRef} className="scroll-mt-36">
+              <div className="flex gap-1 overflow-x-auto border-b border-slate-200">
                 {projectTabs.map((tab) => (
                   <button
                     key={tab}
                     type="button"
                     onClick={() => setActiveTab(tab)}
-                    className={`rounded-md px-3 py-2 text-sm font-semibold ${
-                      activeTab === tab ? 'bg-slate-900 text-white' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
+                    className={`-mb-px shrink-0 border-b-2 px-4 py-3 text-sm font-bold transition ${
+                      activeTab === tab ? 'border-blue-600 text-blue-700' : 'border-transparent text-slate-500 hover:border-slate-300 hover:text-slate-800'
                     }`}
                   >
                     {tab}
                   </button>
                 ))}
               </div>
-              <div className="p-4">
+              <div className="pt-6">
                 {activeTab === '고객 견적·계약 관리' && contract && (
                   <ContractManagementPanel
                     contract={contract}
@@ -996,6 +984,12 @@ function App() {
                     requestPaymentApprovals={requestPaymentApprovals}
                   />
                 )}
+                {activeTab === '현장 작업일지' && selectedProjectId && (
+                  <DailyLogPanel project={selectedProject} projectId={selectedProjectId} />
+                )}
+                {activeTab === '현장 회의록' && selectedProjectId && (
+                  <MeetingMinutesPanel project={selectedProject} projectId={selectedProjectId} />
+                )}
                 {activeTab === '준공정산' && settlement && (
                   <SettlementPanel
                     settlement={settlement}
@@ -1004,8 +998,7 @@ function App() {
                     requestSettlementApproval={requestSettlementApproval}
                   />
                 )}
-                {activeTab === '공종별 흐름 추적' && <CostBreakdownTable rows={summary.cost_breakdown} />}
-                {activeTab !== '고객 견적·계약 관리' && activeTab !== '세부실행예산' && activeTab !== '업체 비교견적' && activeTab !== '계약/발주 이력' && activeTab !== '기성 및 지급 현황' && activeTab !== '준공정산' && activeTab !== '공종별 흐름 추적' && (
+                {activeTab !== '고객 견적·계약 관리' && activeTab !== '세부실행예산' && activeTab !== '업체 비교견적' && activeTab !== '계약/발주 이력' && activeTab !== '기성 및 지급 현황' && activeTab !== '현장 작업일지' && activeTab !== '현장 회의록' && activeTab !== '준공정산' && (
                   <div className="rounded-md border border-dashed border-slate-300 bg-slate-50 p-8 text-center text-sm text-slate-500">
                     {activeTab} 상세 목록은 다음 단계 API에서 확장 예정입니다. 현재 계산값은 상단 통합현황에 반영되어 있습니다.
                   </div>

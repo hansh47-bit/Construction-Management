@@ -1,29 +1,34 @@
-import { AlertTriangle, ArrowLeft, ArrowRight, Banknote, BriefcaseBusiness, CheckCircle2, ClipboardList, FileClock, MapPin } from 'lucide-react'
-import { SubMetric } from '../../components/ui/Metrics'
+import { ArrowLeft, CheckCircle2, MapPin, TrendingUp, WalletCards } from 'lucide-react'
+import type { ReactNode } from 'react'
 import { formatWon } from '../../lib/format'
 import type { ExecutionBudgetDetailResponse, IntegratedSummary, Project } from '../../types/domain'
 
-export function ProjectOverview({ project, summary, executionBudget, onBack, onStartConstruction, onSynchronizePreparation, onMoveToTab }: {
-  project?: Project
-  summary: IntegratedSummary
-  executionBudget: ExecutionBudgetDetailResponse | null
-  onBack: () => void
-  onStartConstruction: () => void
-  onSynchronizePreparation: () => void
-  onMoveToTab: (tab: string) => void
-}) {
-  const flowCards: [string, number, string][] = [
-    ['현재 계약금액', summary.flow_summary.current_contract_amount, '계약/발주 이력'],
-    ['현재 실행예산', summary.flow_summary.current_execution_budget, '공종별 흐름 추적'],
-    ['현재 발주금액', summary.flow_summary.current_purchase_amount, '계약/발주 이력'],
-    ['누적 기성금액', summary.flow_summary.accumulated_completed_amount, '기성 및 지급 현황'],
-    ['실제 지급금액', summary.flow_summary.actual_paid_amount, '기성 및 지급 현황'],
-  ]
-  return <>
-    <section className="rounded-md border border-slate-200 bg-white p-4 shadow-sm">
-      <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between"><div><button type="button" onClick={onBack} className="mb-3 inline-flex items-center gap-2 rounded-md border border-slate-300 px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50"><ArrowLeft className="h-4 w-4" />목록</button><div className="flex flex-wrap items-center gap-2"><h2 className="text-xl font-semibold text-slate-950">{project?.project_name ?? '프로젝트'}</h2>{project?.status && <span className="rounded-full bg-cyan-100 px-2.5 py-1 text-xs font-semibold text-cyan-800">{project.status}</span>}{project?.status === '공사준비' && <button type="button" onClick={onStartConstruction} className="rounded-md bg-cyan-700 px-3 py-1.5 text-xs font-semibold text-white hover:bg-cyan-800">공사 시작</button>}{project?.status === '계약' && executionBudget?.approval_status === 'APPROVED' && <button type="button" onClick={onSynchronizePreparation} className="rounded-md border border-cyan-700 px-3 py-1.5 text-xs font-semibold text-cyan-800 hover:bg-cyan-50">실행예산 승인 반영</button>}</div><p className="mt-2 text-sm text-slate-600">{project?.project_code} · {project?.client_name ?? '발주처 미입력'}</p><p className="mt-4 flex items-center gap-2 text-sm text-slate-600"><MapPin className="h-4 w-4 text-slate-400" />{project?.site_address ?? '현장주소 미입력'}</p></div><div className="rounded-md border border-slate-200 bg-slate-50 p-4 text-sm text-slate-600 lg:text-right"><p className="font-medium text-slate-800">목표 이익률 {project?.target_profit_rate ?? 0}%</p><p className="mt-1">담당자 {project?.manager_id ?? '미지정'}</p><p className="mt-1">팀장 {project?.team_leader_id ?? '미지정'}</p></div></div>
-    </section>
-    <section className="rounded-md border border-slate-200 bg-white p-4 shadow-sm"><div className="grid gap-3 xl:grid-cols-5">{flowCards.map(([label, value, targetTab], index) => <button key={label} type="button" onClick={() => onMoveToTab(targetTab)} className="group rounded-md border border-slate-200 bg-white p-4 text-left shadow-sm transition hover:border-cyan-300 hover:bg-cyan-50"><div className="flex items-center justify-between gap-2"><p className="text-sm font-medium text-slate-500">{label}</p>{index < flowCards.length - 1 && <ArrowRight className="h-4 w-4 text-slate-300 group-hover:text-cyan-700" />}</div><p className="mt-3 text-xl font-semibold text-slate-950">{formatWon(value)}</p></button>)}</div></section>
-    <section className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4"><SubMetric label="목표 원가한도" value={formatWon(summary.profit_and_balance.target_cost_limit)} icon={<CheckCircle2 />} /><SubMetric label="예상 최종원가" value={formatWon(summary.profit_and_balance.expected_final_cost)} icon={<ClipboardList />} /><SubMetric label="예상 이익 / 이익률" value={`${formatWon(summary.profit_and_balance.expected_profit)} / ${summary.profit_and_balance.expected_profit_rate}%`} icon={<BriefcaseBusiness />} accent={summary.profit_and_balance.expected_profit >= 0 ? 'text-cyan-700' : 'text-rose-700'} /><SubMetric label="미발주 예정원가" value={formatWon(summary.profit_and_balance.unpurchased_budget_amount)} icon={<FileClock />} /><SubMetric label="미기성금액" value={formatWon(summary.profit_and_balance.unbilled_amount)} icon={<Banknote />} /><SubMetric label="승인 후 미지급" value={formatWon(summary.profit_and_balance.approved_unpaid_amount)} icon={<AlertTriangle />} /><SubMetric label="총 미지급 잔액" value={formatWon(summary.profit_and_balance.total_unpaid_balance)} icon={<Banknote />} /></section>
-  </>
+function statusClass(status?: string) {
+  if (status === '정산완료') return 'border-emerald-200 bg-emerald-100 text-emerald-800'
+  if (status === '정산중' || status === '공사준비') return 'border-amber-200 bg-amber-100 text-amber-800'
+  if (status === '공사진행') return 'border-blue-200 bg-blue-100 text-blue-800'
+  return 'border-slate-200 bg-slate-100 text-slate-700'
+}
+
+function MetricCard({ label, value, helper, tone = 'default', onClick, children }: { label: string; value: string; helper?: string; tone?: 'default' | 'brand' | 'warning'; onClick?: () => void; children?: ReactNode }) {
+  const color = tone === 'brand' ? 'border-blue-200 bg-white text-blue-700 ring-1 ring-blue-100' : tone === 'warning' ? 'border-rose-200 bg-rose-50 text-rose-700' : 'border-slate-200 bg-white text-slate-950'
+  const content = <><p className="text-xs font-semibold text-slate-500">{label}</p><p className={`mt-2 text-xl font-bold tracking-tight ${tone === 'brand' ? 'text-blue-700' : tone === 'warning' ? 'text-rose-700' : 'text-slate-950'}`}>{value}</p>{helper && <p className="mt-1 text-xs text-slate-500">{helper}</p>}{children}</>
+  return onClick ? <button type="button" onClick={onClick} className={`min-h-30 rounded-xl border p-4 text-left transition hover:-translate-y-0.5 hover:shadow-md ${color}`}>{content}</button> : <article className={`min-h-30 rounded-xl border p-4 ${color}`}>{content}</article>
+}
+
+function MetricGroup({ title, icon, children, tone = 'default' }: { title: string; icon: ReactNode; children: ReactNode; tone?: 'default' | 'brand' }) {
+  return <section className={`rounded-2xl border p-5 shadow-sm ${tone === 'brand' ? 'border-blue-100 bg-blue-50/60' : 'border-slate-200 bg-white'}`}><h3 className={`flex items-center gap-2 text-sm font-bold ${tone === 'brand' ? 'text-blue-800' : 'text-slate-800'}`}><span className={tone === 'brand' ? 'text-blue-600' : 'text-slate-500'}>{icon}</span>{title}</h3><div className="mt-4 grid gap-3 sm:grid-cols-2 xl:grid-cols-3">{children}</div></section>
+}
+
+export function ProjectOverview({ project, summary, executionBudget, onBack, onStartConstruction, onSynchronizePreparation, onMoveToTab }: { project?: Project; summary: IntegratedSummary; executionBudget: ExecutionBudgetDetailResponse | null; onBack: () => void; onStartConstruction: () => void; onSynchronizePreparation: () => void; onMoveToTab: (tab: string) => void }) {
+  const flow = summary.flow_summary
+  const profit = summary.profit_and_balance
+  const budgetUsage = profit.target_cost_limit > 0 ? Math.min(100, Math.max(0, (flow.current_execution_budget / profit.target_cost_limit) * 100)) : 0
+  const executionRevision = executionBudget?.applied_revision_number
+  return <div className="space-y-6">
+    <section className="flex flex-col gap-4 border-b border-slate-200 pb-6 lg:flex-row lg:items-start lg:justify-between"><div className="flex gap-4"><button type="button" onClick={onBack} className="mt-1 inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-lg border border-slate-200 bg-white text-slate-500 transition hover:border-blue-300 hover:text-blue-700" aria-label="프로젝트 목록으로"><ArrowLeft className="h-5 w-5" /></button><div><div className="flex flex-wrap items-center gap-2"><h2 className="text-2xl font-bold tracking-tight text-slate-950">{project?.project_name ?? '프로젝트'}</h2>{project?.status && <span className={`rounded-full border px-2.5 py-1 text-xs font-bold ${statusClass(project.status)}`}>{project.status}</span>}{executionRevision && <span className="rounded-full border border-blue-200 bg-blue-50 px-2.5 py-1 text-xs font-bold text-blue-700">{executionRevision}차 승인본</span>}</div><p className="mt-2 text-sm font-medium text-slate-500">{project?.project_code} <span className="mx-1 text-slate-300">|</span> {project?.client_name ?? '발주처 미입력'}</p><p className="mt-2 flex items-center gap-1.5 text-sm text-slate-500"><MapPin className="h-4 w-4" />{project?.site_address ?? '현장주소 미입력'}</p></div></div><div className="flex flex-wrap items-center gap-2 lg:justify-end"><span className="rounded-lg bg-slate-100 px-3 py-2 text-xs font-semibold text-slate-600">목표 이익률 {project?.target_profit_rate ?? 0}%</span>{project?.status === '공사준비' && <button type="button" onClick={onStartConstruction} className="rounded-lg bg-blue-700 px-3 py-2 text-xs font-bold text-white hover:bg-blue-800">공사 시작</button>}{project?.status === '계약' && executionBudget?.approval_status === 'APPROVED' && <button type="button" onClick={onSynchronizePreparation} className="rounded-lg border border-blue-200 bg-blue-50 px-3 py-2 text-xs font-bold text-blue-700 hover:bg-blue-100">실행예산 승인 반영</button>}</div></section>
+    <div className="grid gap-5 xl:grid-cols-2"><MetricGroup title="수주 및 목표 현황" icon={<TrendingUp className="h-4 w-4" />} tone="brand"><MetricCard label="현재 계약금액" value={formatWon(flow.current_contract_amount)} helper="현재 승인 계약 공급가액" tone="brand" onClick={() => onMoveToTab('고객 견적·계약 관리')} /><MetricCard label="목표 원가한도" value={formatWon(profit.target_cost_limit)} helper="목표 이익률 기준" /><MetricCard label="예상 이익 / 이익률" value={`${formatWon(profit.expected_profit)} · ${profit.expected_profit_rate}%`} helper="계약금액 - 예상 최종원가" tone={profit.expected_profit < 0 ? 'warning' : 'brand'} /></MetricGroup><MetricGroup title="실제 자금 집행 현황" icon={<WalletCards className="h-4 w-4" />}><MetricCard label="현재 실행예산" value={formatWon(flow.current_execution_budget)} helper={`목표 원가 대비 ${budgetUsage.toFixed(1)}% 사용`} onClick={() => onMoveToTab('세부실행예산')}><div className="mt-3 h-1.5 overflow-hidden rounded-full bg-slate-200"><div className="h-full rounded-full bg-blue-600" style={{ width: `${budgetUsage}%` }} /></div></MetricCard><MetricCard label="현재 발주금액" value={formatWon(flow.current_purchase_amount)} helper="승인된 현재 차수 발주" onClick={() => onMoveToTab('계약/발주 이력')} /><MetricCard label="누적 기성금액" value={formatWon(flow.accumulated_completed_amount)} helper="승인 기성 누계" onClick={() => onMoveToTab('기성 및 지급 현황')} /></MetricGroup></div>
+    <section className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4"><MetricCard label="실제 지급금액" value={formatWon(flow.actual_paid_amount)} helper="실제 송금 완료 누계" /><MetricCard label="예상 최종원가" value={formatWon(profit.expected_final_cost)} helper="확정 발주 + 미발주 예산" /><MetricCard label="미발주 예정원가" value={formatWon(profit.unpurchased_budget_amount)} helper="추가 발주 필요 예산" tone="warning" /><MetricCard label="총 미지급 잔액" value={formatWon(profit.total_unpaid_balance)} helper="발주 기준 실제 지급 전 잔액" tone="warning" /></section>
+    <section className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3"><MetricCard label="미기성금액" value={formatWon(profit.unbilled_amount)} helper="발주 대비 승인 기성 잔액" /><MetricCard label="승인 후 미지급" value={formatWon(profit.approved_unpaid_amount)} helper="승인 기성 중 미지급 금액" tone={profit.approved_unpaid_amount > 0 ? 'warning' : 'default'} /><article className="flex items-center gap-3 rounded-xl border border-slate-200 bg-slate-50 p-4 text-sm text-slate-600"><CheckCircle2 className="h-5 w-5 text-emerald-600" /><span>모든 금액은 현재 승인 차수 기준으로 집계됩니다.</span></article></section>
+  </div>
 }

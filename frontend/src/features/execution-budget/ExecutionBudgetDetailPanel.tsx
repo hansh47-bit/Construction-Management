@@ -1,4 +1,4 @@
-import { AlertTriangle, ArrowLeft, ArrowRight, Download, Plus, Save, Trash2, Upload } from 'lucide-react'
+import { AlertTriangle, ArrowLeft, ArrowRight, Download, FileSpreadsheet, FileText, Plus, Save, Trash2, Upload } from 'lucide-react'
 import { useState } from 'react'
 import { MetricPanel } from '../../components/ui/Metrics'
 import { MoneyInput } from '../../components/ui/MoneyInput'
@@ -7,6 +7,13 @@ import { apiUrl } from '../../lib/api-client'
 import type { ContractFile, ExecutionBudgetDetail, ExecutionBudgetDetailResponse, ExecutionBudgetSummaryItem } from '../../types/domain'
 
 const costTypes = ['외주비', '폐기물', '인건비', '장비비', '운반비', '자재비', '현장경비']
+
+function AttachmentIcon({ fileName }: { fileName: string }) {
+  const extension = fileName.split('.').pop()?.toLowerCase()
+  if (extension === 'xlsx' || extension === 'xls' || extension === 'csv') return <span className="flex h-9 w-9 items-center justify-center rounded-lg bg-emerald-50 text-emerald-600"><FileSpreadsheet className="h-5 w-5" /></span>
+  if (extension === 'pdf') return <span className="flex h-9 w-9 items-center justify-center rounded-lg bg-rose-50 text-rose-600"><FileText className="h-5 w-5" /></span>
+  return <span className="flex h-9 w-9 items-center justify-center rounded-lg bg-blue-50 text-blue-600"><FileText className="h-5 w-5" /></span>
+}
 
 export function ExecutionBudgetDetailPanel({
   executionBudget,
@@ -51,7 +58,7 @@ export function ExecutionBudgetDetailPanel({
     <div>
       <div className="flex flex-col gap-4 border-b border-slate-200 pb-4 lg:flex-row lg:items-center lg:justify-between">
         <div>
-          <div className="flex flex-wrap items-center gap-2"><h3 className="text-lg font-semibold text-slate-950">세부실행예산</h3><span className="rounded-full bg-cyan-100 px-2.5 py-1 text-xs font-bold text-cyan-800">{appliedRevisionLabel}</span></div>
+          <div className="flex flex-wrap items-center gap-2"><h3 className="text-lg font-semibold text-slate-950">세부실행예산</h3><span className="rounded-full border border-blue-200 bg-blue-100 px-2.5 py-1 text-xs font-bold text-blue-800">{appliedRevisionLabel}</span></div>
           <p className="mt-1 text-sm text-slate-500">승인된 변경 차수가 있으면 해당 차수의 세부 항목과 금액을 표시합니다. 최초 원본은 변경이력에 보존됩니다.</p>
         </div>
         <button
@@ -94,10 +101,11 @@ export function ExecutionBudgetDetailPanel({
                 href={apiUrl(`${file.download_url}${file.download_url.includes('?') ? '&' : '?'}source=execution-budget`)}
                 className="flex items-center justify-between gap-3 px-4 py-3 text-sm hover:bg-slate-50"
               >
-                <span>
-                  <span className="font-semibold text-slate-900">{file.file_name}</span>
-                  <span className="ml-2 rounded-full bg-slate-100 px-2 py-0.5 text-xs font-semibold text-slate-600">
-                    {file.file_type}
+                <span className="flex min-w-0 items-center gap-3">
+                  <AttachmentIcon fileName={file.file_name} />
+                  <span className="min-w-0">
+                    <span className="block truncate font-semibold text-slate-900">{file.file_name}</span>
+                    <span className="mt-1 inline-block rounded-full bg-slate-100 px-2 py-0.5 text-xs font-semibold text-slate-600">{file.file_type}</span>
                   </span>
                 </span>
                 <Download className="h-4 w-4 shrink-0 text-slate-400" aria-hidden="true" />

@@ -89,6 +89,8 @@ public class ProjectService {
 	private final VendorComparisonRepository vendorComparisonRepository;
 	private final ProjectRevisionRepository projectRevisionRepository;
 	private final ProjectRevisionService projectRevisionService;
+	private final DailyLogService dailyLogService;
+	private final MeetingMinutesService meetingMinutesService;
 
 	public ProjectService(
 			ProjectRepository projectRepository,
@@ -113,7 +115,9 @@ public class ProjectService {
 			ProjectSettlementRepository projectSettlementRepository,
 			VendorComparisonRepository vendorComparisonRepository,
 			ProjectRevisionRepository projectRevisionRepository,
-			ProjectRevisionService projectRevisionService
+			ProjectRevisionService projectRevisionService,
+			DailyLogService dailyLogService,
+			MeetingMinutesService meetingMinutesService
 	) {
 		this.projectRepository = projectRepository;
 		this.projectContractRepository = projectContractRepository;
@@ -138,6 +142,8 @@ public class ProjectService {
 		this.vendorComparisonRepository = vendorComparisonRepository;
 		this.projectRevisionRepository = projectRevisionRepository;
 		this.projectRevisionService = projectRevisionService;
+		this.dailyLogService = dailyLogService;
+		this.meetingMinutesService = meetingMinutesService;
 	}
 
 	@Transactional
@@ -226,6 +232,8 @@ public class ProjectService {
 		customerContractService.deleteFilesForProject(projectId);
 		executionBudgetApprovalAttachmentService.deleteAllForProject(projectId);
 		vendorComparisonAttachmentService.deleteAllForProject(projectId);
+		dailyLogService.deleteAllForProject(projectId);
+		meetingMinutesService.deleteAllForProject(projectId);
 		approvalRepository.deleteByProjectId(projectId);
 		paymentRequestRepository.deleteByProjectId(projectId);
 		poRequisitionRepository.deleteByProjectId(projectId);
