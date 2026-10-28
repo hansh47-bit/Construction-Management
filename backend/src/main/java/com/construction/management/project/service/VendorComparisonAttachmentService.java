@@ -18,7 +18,10 @@ import org.springframework.util.StringUtils;
 import org.springframework.web.multipart.MultipartFile;
 
 @Service
+@org.springframework.security.access.prepost.PreAuthorize("@businessPolicy.allow('PROJECT_READ')")
 public class VendorComparisonAttachmentService {
+	@org.springframework.beans.factory.annotation.Autowired private com.construction.management.auth.BusinessPolicy businessPolicy;
+
 
 	private final VendorComparisonAttachmentRepository attachmentRepository;
 	private final Path uploadRoot;
@@ -32,6 +35,7 @@ public class VendorComparisonAttachmentService {
 	}
 
 	@Transactional
+	@org.springframework.security.access.prepost.PreAuthorize("@businessPolicy.allow('PROCUREMENT_WRITE')")
 	public Attachment save(String projectId, String executionItemId, String comparisonId, MultipartFile file) {
 		if (file == null || file.isEmpty()) {
 			throw new IllegalArgumentException("첨부할 견적서 파일을 선택해 주세요.");
@@ -67,6 +71,7 @@ public class VendorComparisonAttachmentService {
 	}
 
 	@Transactional(readOnly = true)
+	@org.springframework.security.access.prepost.PreAuthorize("@businessPolicy.allow('PROCUREMENT_READ')")
 	public VendorComparisonAttachment getFile(String projectId, String executionItemId, String attachmentId) {
 		VendorComparisonAttachment attachment = attachmentRepository.findById(attachmentId)
 				.orElseThrow(() -> new EntityNotFoundException("비교견적 첨부파일을 찾을 수 없습니다."));
@@ -76,6 +81,7 @@ public class VendorComparisonAttachmentService {
 		return attachment;
 	}
 
+	@org.springframework.security.access.prepost.PreAuthorize("@businessPolicy.allow('PROCUREMENT_READ')")
 	public Resource loadFileResource(VendorComparisonAttachment attachment) {
 		try {
 			Resource resource = new UrlResource(Path.of(attachment.getFilePath()).toUri());
@@ -89,6 +95,7 @@ public class VendorComparisonAttachmentService {
 	}
 
 	@Transactional
+	@org.springframework.security.access.prepost.PreAuthorize("@businessPolicy.allow('PROJECT_DELETE')")
 	public void deleteAllForProject(String projectId) {
 		List<VendorComparisonAttachment> attachments = attachmentRepository.findByProjectIdOrderByUploadedAtAsc(projectId);
 		try {

@@ -35,7 +35,10 @@ import org.springframework.transaction.annotation.Transactional;
 import org.springframework.util.StringUtils;
 
 @Service
+@org.springframework.security.access.prepost.PreAuthorize("@businessPolicy.allow('PROJECT_READ')")
 public class ExecutionBudgetDetailService {
+	@org.springframework.beans.factory.annotation.Autowired private com.construction.management.auth.BusinessPolicy businessPolicy;
+
 
 	private final ProjectRepository projectRepository;
 	private final CustomerContractItemRepository customerContractItemRepository;
@@ -70,13 +73,17 @@ public class ExecutionBudgetDetailService {
 	}
 
 	@Transactional(readOnly = true)
+	@org.springframework.security.access.prepost.PreAuthorize("@businessPolicy.allow('BUDGET_READ')")
 	public ExecutionBudgetDetailResponse getDetails(String projectId) {
 		Project project = getProject(projectId);
 		return toResponse(project, projectRevisionService.latestApprovedBudget(projectId).orElse(null));
 	}
 
 	@Transactional
+	@org.springframework.security.access.prepost.PreAuthorize("@businessPolicy.allow('BUDGET_WRITE')")
+	@com.construction.management.auth.BusinessAction
 	public ExecutionBudgetDetailResponse saveDetails(String projectId, ExecutionBudgetDetailRequest request) {
+		businessPolicy.draft("BUDGET", projectId, null);
 		projectSettlementService.assertNotSettled(projectId);
 		Project project = getProject(projectId);
 		boolean locked = itemRepository.findByProjectIdOrderByItemIdAsc(projectId).stream()

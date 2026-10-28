@@ -21,7 +21,10 @@ import org.springframework.web.multipart.MultipartFile;
 import org.springframework.web.server.ResponseStatusException;
 
 @Service
+@org.springframework.security.access.prepost.PreAuthorize("@businessPolicy.allow('PROJECT_READ')")
 public class DailyLogService {
+	@org.springframework.beans.factory.annotation.Autowired private com.construction.management.auth.BusinessPolicy businessPolicy;
+
 	private final ProjectRepository projectRepository;
 	private final DailyLogRepository dailyLogRepository;
 	private final DailyLogLaborEntryRepository laborRepository;
@@ -39,6 +42,7 @@ public class DailyLogService {
 	}
 
 	@Transactional(readOnly = true)
+	@org.springframework.security.access.prepost.PreAuthorize("@businessPolicy.allow('SITE_READ')")
 	public List<DailyLogResponse> list(String projectId, LocalDate from, LocalDate to) {
 		ensureProject(projectId);
 		List<DailyLog> logs = from != null && to != null
@@ -48,9 +52,12 @@ public class DailyLogService {
 	}
 
 	@Transactional(readOnly = true)
+	@org.springframework.security.access.prepost.PreAuthorize("@businessPolicy.allow('SITE_READ')")
 	public DailyLogResponse get(String projectId, String dailyLogId) { return toResponse(getLog(projectId, dailyLogId)); }
 
 	@Transactional
+	@org.springframework.security.access.prepost.PreAuthorize("@businessPolicy.allow('SITE_WRITE')")
+	@com.construction.management.auth.BusinessAction
 	public DailyLogResponse create(String projectId, DailyLogRequest request) {
 		ensureWritable(projectId);
 		if (dailyLogRepository.findByProjectIdAndLogDate(projectId, request.logDate()).isPresent()) {
@@ -65,7 +72,10 @@ public class DailyLogService {
 	}
 
 	@Transactional
+	@org.springframework.security.access.prepost.PreAuthorize("@businessPolicy.allow('SITE_WRITE')")
+	@com.construction.management.auth.BusinessAction
 	public DailyLogResponse update(String projectId, String dailyLogId, DailyLogRequest request) {
+		businessPolicy.ownEntity(com.construction.management.project.domain.DailyLog.class, dailyLogId);
 		ensureWritable(projectId);
 		DailyLog log = getLog(projectId, dailyLogId);
 		if (!log.getLogDate().equals(request.logDate())) {
@@ -78,7 +88,10 @@ public class DailyLogService {
 	}
 
 	@Transactional
+	@org.springframework.security.access.prepost.PreAuthorize("@businessPolicy.allow('SITE_WRITE')")
+	@com.construction.management.auth.BusinessAction
 	public DailyLogResponse uploadPhoto(String projectId, String dailyLogId, String phase, String caption, MultipartFile file, String uploadedBy) {
+		businessPolicy.ownEntity(com.construction.management.project.domain.DailyLog.class, dailyLogId);
 		ensureWritable(projectId);
 		DailyLog log = getLog(projectId, dailyLogId);
 		if (file == null || file.isEmpty()) throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "업로드할 사진을 선택하세요.");
@@ -92,7 +105,10 @@ public class DailyLogService {
 	}
 
 	@Transactional
+	@org.springframework.security.access.prepost.PreAuthorize("@businessPolicy.allow('SITE_WRITE')")
+	@com.construction.management.auth.BusinessAction
 	public DailyLogResponse deletePhoto(String projectId, String dailyLogId, String photoId) {
+		businessPolicy.ownEntity(com.construction.management.project.domain.DailyLog.class, dailyLogId);
 		ensureWritable(projectId);
 		DailyLog log = getLog(projectId, dailyLogId);
 		DailyLogPhoto photo = photoRepository.findById(photoId).orElseThrow(() -> new EntityNotFoundException("현장 사진을 찾을 수 없습니다."));
@@ -102,19 +118,24 @@ public class DailyLogService {
 	}
 
 	@Transactional
+	@org.springframework.security.access.prepost.PreAuthorize("@businessPolicy.allow('SITE_WRITE')")
+	@com.construction.management.auth.BusinessAction
 	public void delete(String projectId, String dailyLogId) {
+		businessPolicy.ownEntity(com.construction.management.project.domain.DailyLog.class, dailyLogId);
 		ensureWritable(projectId); DailyLog log = getLog(projectId, dailyLogId);
-		if (!"DRAFT".equals(log.getStatus())) { log.update(log.getWeatherCondition(), log.getTemperatureC(), log.getSiteManagerName(), log.getTodayWorkContent(), log.getTomorrowPlan(), log.isSafetyTrainingCompleted(), log.getSafetyTrainingNote(), log.getComplaintNote(), log.getDesignChangeIssueNote(), log.getOtherNote(), "DELETED", "system"); return; }
+		if (!"DRAFT".equals(log.getStatus())) { log.update(log.getWeatherCondition(), log.getTemperatureC(), log.getSiteManagerName(), log.getTodayWorkContent(), log.getTomorrowPlan(), log.isSafetyTrainingCompleted(), log.getSafetyTrainingNote(), log.getComplaintNote(), log.getDesignChangeIssueNote(), log.getOtherNote(), "DELETED", com.construction.management.auth.CurrentActor.name()); return; }
 		deleteAllFiles(dailyLogId); laborRepository.deleteByDailyLogId(dailyLogId); equipmentRepository.deleteByDailyLogId(dailyLogId); materialRepository.deleteByDailyLogId(dailyLogId); dailyLogRepository.delete(log);
 	}
 
 	@Transactional
+	@org.springframework.security.access.prepost.PreAuthorize("@businessPolicy.allow('PROJECT_DELETE')")
 	public void deleteAllForProject(String projectId) {
 		for (DailyLog log : dailyLogRepository.findByProjectIdOrderByLogDateDesc(projectId)) { deleteAllFiles(log.getDailyLogId()); laborRepository.deleteByDailyLogId(log.getDailyLogId()); equipmentRepository.deleteByDailyLogId(log.getDailyLogId()); materialRepository.deleteByDailyLogId(log.getDailyLogId()); }
 		dailyLogRepository.deleteByProjectId(projectId);
 	}
 
 	@Transactional(readOnly = true)
+	@org.springframework.security.access.prepost.PreAuthorize("@businessPolicy.allow('SITE_READ')")
 	public Resource loadPhoto(String projectId, String dailyLogId, String photoId) {
 		getLog(projectId, dailyLogId); DailyLogPhoto photo = photoRepository.findById(photoId).orElseThrow(() -> new EntityNotFoundException("현장 사진을 찾을 수 없습니다."));
 		if (!dailyLogId.equals(photo.getDailyLogId())) throw new EntityNotFoundException("해당 작업일지의 사진이 아닙니다.");
@@ -135,7 +156,7 @@ public class DailyLogService {
 	}
 	private DailyLogResponse toResponse(DailyLog log) {
 		String id = log.getDailyLogId();
-		return new DailyLogResponse(id, log.getProjectId(), log.getLogDate(), log.getWeatherCondition(), log.getTemperatureC(), log.getSiteManagerName(), log.getTodayWorkContent(), log.getTomorrowPlan(), log.isSafetyTrainingCompleted(), log.getSafetyTrainingNote(), log.getComplaintNote(), log.getDesignChangeIssueNote(), log.getOtherNote(), log.getStatus(), log.getCreatedBy(), log.getCreatedAt(), log.getUpdatedAt(),
+		return new DailyLogResponse(id, log.getProjectId(), log.getLogDate(), log.getWeatherCondition(), log.getTemperatureC(), log.getSiteManagerName(), log.getTodayWorkContent(), log.getTomorrowPlan(), log.isSafetyTrainingCompleted(), log.getSafetyTrainingNote(), log.getComplaintNote(), log.getDesignChangeIssueNote(), log.getOtherNote(), log.getStatus(), log.getCreatedUserId()==null ? "기존 기록 · "+log.getCreatedBy() : log.getCreatedBy(), log.getCreatedUserId(), log.getCreatedAt(), log.getUpdatedAt(),
 				laborRepository.findByDailyLogIdOrderBySortOrderAsc(id).stream().map(e -> new DailyLogResponse.LaborEntry(e.getId(), e.getTradeName(), e.getWorkforceType(), e.getVendorName(), e.getHeadcount(), e.getNote())).toList(),
 				equipmentRepository.findByDailyLogIdOrderBySortOrderAsc(id).stream().map(e -> new DailyLogResponse.EquipmentEntry(e.getId(), e.getEquipmentName(), e.getQuantity(), e.getNote())).toList(),
 				materialRepository.findByDailyLogIdOrderBySortOrderAsc(id).stream().map(e -> new DailyLogResponse.MaterialEntry(e.getId(), e.getEntryType(), e.getItemName(), e.getQuantity(), e.getUnit(), e.getNote())).toList(),
@@ -149,7 +170,7 @@ public class DailyLogService {
 	private void deleteAllFiles(String dailyLogId) { for (DailyLogPhoto photo : photoRepository.findByDailyLogIdOrderBySortOrderAscUploadedAtAsc(dailyLogId)) deleteStoredFile(photo.getStorageKey()); photoRepository.deleteByDailyLogId(dailyLogId); }
 	private void deleteStoredFile(String key) { try { Path path = Path.of(key).toAbsolutePath().normalize(); if (!path.startsWith(uploadRoot)) throw new IllegalStateException("잘못된 파일 경로입니다."); Files.deleteIfExists(path); } catch (IOException ex) { throw new IllegalStateException("첨부파일 삭제에 실패했습니다.", ex); } }
 	private static String status(String value) { return Set.of("DRAFT", "SHARED", "ARCHIVED").contains(value) ? value : "DRAFT"; }
-	private static String author(String value) { return StringUtils.hasText(value) ? value.trim() : "현장 담당자"; }
+	private static String author(String value) { return com.construction.management.auth.CurrentActor.name(); }
 	private static String trim(String value) { return value == null ? null : value.trim(); }
 	private static String cleanName(String value, String fallback) { String name = StringUtils.cleanPath(value == null ? fallback : value); return StringUtils.hasText(name) ? name : fallback; }
 }

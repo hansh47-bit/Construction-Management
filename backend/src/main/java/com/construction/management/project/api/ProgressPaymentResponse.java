@@ -38,7 +38,8 @@ public record ProgressPaymentResponse(
 			@JsonProperty("payment_state") String paymentState,
 			@JsonProperty("paid_total") BigDecimal paidTotal,
 			@JsonProperty("remaining_payable") BigDecimal remainingPayable,
-			List<PaymentStatus> payments
+			List<PaymentStatus> payments,
+            @JsonProperty("created_user_id") String createdUserId
 	) {
 	}
 
@@ -48,7 +49,9 @@ public record ProgressPaymentResponse(
 			@JsonProperty("paid_date") LocalDate paidDate,
 			@JsonProperty("payment_status") String paymentStatus,
 			@JsonProperty("account_info") String accountInfo,
-			@JsonProperty("receipt_link") String receiptLink
+			@JsonProperty("receipt_link") String receiptLink,
+            @JsonProperty("paid_by_user_id") String paidByUserId,
+            @JsonProperty("paid_by_name") String paidByName
 	) {
 	}
 }

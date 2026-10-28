@@ -46,7 +46,10 @@ import org.springframework.transaction.annotation.Transactional;
  * A decrease may never lower a PO below approved progress claims or actual payments.
  */
 @Service
+@org.springframework.security.access.prepost.PreAuthorize("@businessPolicy.allow('PROJECT_READ')")
 public class ChangeManagementService {
+	@org.springframework.beans.factory.annotation.Autowired private com.construction.management.auth.BusinessPolicy businessPolicy;
+
 	private final ProjectRepository projectRepository;
 	private final CustomerContractItemRepository customerContractItemRepository;
 	private final ProjectExecutionBudgetItemRepository budgetItemRepository;
@@ -89,6 +92,8 @@ public class ChangeManagementService {
 	}
 
 	@Transactional
+	@org.springframework.security.access.prepost.PreAuthorize("@businessPolicy.allow('CHANGE_WRITE')")
+	@com.construction.management.auth.BusinessAction
 	public ChangeOrderResponse createChangeOrder(String projectId, ChangeOrderCreateRequest request) {
 		projectSettlementService.assertNotSettled(projectId);
 		projectRepository.findById(projectId).orElseThrow(() -> new EntityNotFoundException("Project not found: " + projectId));
@@ -99,13 +104,16 @@ public class ChangeManagementService {
 		}
 		ChangeOrder order = changeOrderRepository.save(new ChangeOrder(
 				nextChangeCode(), projectId, request.title(), request.reason(),
-				request.requestedBy() == null || request.requestedBy().isBlank() ? "system" : request.requestedBy(),
+				com.construction.management.auth.CurrentActor.name(),
 				nextRevisionNumber(projectId), contractChangeEnabled, budgetChangeEnabled));
 		return response(order, BigDecimal.ZERO, BigDecimal.ZERO, BigDecimal.ZERO, false, null, List.of());
 	}
 
 	@Transactional
+	@org.springframework.security.access.prepost.PreAuthorize("@businessPolicy.allow('CHANGE_WRITE')")
+	@com.construction.management.auth.BusinessAction
 	public ChangeOrderResponse saveContractProposal(String projectId, String changeOrderId, ContractChangeRequest request) {
+		businessPolicy.ownEntity(com.construction.management.project.domain.ChangeOrder.class, changeOrderId);
 		ChangeOrder order = requiredOrder(projectId, changeOrderId);
 		ensureDraft(order);
 		if (!order.hasContractChange()) throw new IllegalStateException("This revision does not include a contract change.");
@@ -116,7 +124,10 @@ public class ChangeManagementService {
 	}
 
 	@Transactional
+	@org.springframework.security.access.prepost.PreAuthorize("@businessPolicy.allow('CHANGE_WRITE')")
+	@com.construction.management.auth.BusinessAction
 	public ChangeOrderResponse saveBudgetProposal(String projectId, String changeOrderId, BudgetChangeProposalRequest request) {
+		businessPolicy.ownEntity(com.construction.management.project.domain.ChangeOrder.class, changeOrderId);
 		ChangeOrder order = requiredOrder(projectId, changeOrderId);
 		ensureDraft(order);
 		if (!order.hasBudgetChange()) throw new IllegalStateException("This revision does not include an execution-budget change.");
@@ -150,7 +161,10 @@ public class ChangeManagementService {
 	}
 
 	@Transactional
+	@org.springframework.security.access.prepost.PreAuthorize("@businessPolicy.allow('CHANGE_REQUEST')")
+	@com.construction.management.auth.BusinessAction
 	public ChangeOrderResponse requestApproval(String projectId, String changeOrderId) {
+		businessPolicy.ownEntity(com.construction.management.project.domain.ChangeOrder.class, changeOrderId);
 		ChangeOrder order = requiredOrder(projectId, changeOrderId);
 		ensureDraft(order);
 		List<ContractChange> contractChanges = contractChangeRepository.findByChangeCode(changeOrderId);
@@ -197,11 +211,13 @@ public class ChangeManagementService {
 	}
 
 	@Transactional(readOnly = true)
+	@org.springframework.security.access.prepost.PreAuthorize("@businessPolicy.allow('CHANGE_READ')")
 	public ChangeOrderResponse getImpactSummary(String projectId, String changeOrderId) {
 		return responseFor(projectId, requiredOrder(projectId, changeOrderId));
 	}
 
 	@Transactional(readOnly = true)
+	@org.springframework.security.access.prepost.PreAuthorize("@businessPolicy.allow('CHANGE_READ')")
 	public ChangeOrderResponse getReconciliation(String projectId, String changeOrderId) {
 		ChangeOrder order = requiredOrder(projectId, changeOrderId);
 		List<PoChange> changes = poChangeRepository.findByChangeCode(changeOrderId);
@@ -210,6 +226,7 @@ public class ChangeManagementService {
 	}
 
 	@Transactional
+	@org.springframework.security.access.prepost.PreAuthorize("@businessPolicy.allow('APPROVAL_DECIDE')")
 	public void approveChangeApproval(Approval approval) {
 		String code = approval.getTargetId();
 		if ("CONTRACT_CHANGE".equals(approval.getApprovalType())) contractChangeRepository.findByChangeCode(code).forEach(change -> { change.approve(); contractChangeRepository.save(change); });
@@ -219,6 +236,7 @@ public class ChangeManagementService {
 	}
 
 	@Transactional
+	@org.springframework.security.access.prepost.PreAuthorize("@businessPolicy.allow('APPROVAL_DECIDE')")
 	public void rejectChangeApproval(Approval approval) {
 		String code = approval.getTargetId();
 		if ("CONTRACT_CHANGE".equals(approval.getApprovalType())) contractChangeRepository.findByChangeCode(code).forEach(change -> { change.reject(); contractChangeRepository.save(change); });
@@ -228,6 +246,8 @@ public class ChangeManagementService {
 	}
 
 	@Transactional
+	@org.springframework.security.access.prepost.PreAuthorize("@businessPolicy.allow('EXECUTIVE_CORRECT')")
+	@com.construction.management.auth.BusinessAction
 	public ChangeOrderResponse correctByExecutive(String projectId, ExecutiveCorrectionRequest request) {
 		projectSettlementService.assertNotSettled(projectId);
 		Project project = projectRepository.findById(projectId)
@@ -237,7 +257,7 @@ public class ChangeManagementService {
 		if (contractDelta.signum() == 0) throw new IllegalArgumentException("Current contract amount is unchanged.");
 
 		String changeCode = nextChangeCode();
-		ChangeOrder order = changeOrderRepository.save(new ChangeOrder(changeCode, projectId, "Contract change", request.reason(), "executive"));
+		ChangeOrder order = changeOrderRepository.save(new ChangeOrder(changeCode, projectId, "Contract change", request.reason(), com.construction.management.auth.CurrentActor.name()));
 		List<ProjectExecutionBudgetItem> budgetItems = Boolean.FALSE.equals(request.applyExecutionBudget())
 				? List.of()
 				: budgetItemRepository.findByProjectIdOrderByItemIdAsc(projectId).stream().filter(ProjectExecutionBudgetItem::isApproved).toList();
@@ -273,6 +293,7 @@ public class ChangeManagementService {
 	}
 
 	@Transactional(readOnly = true)
+	@org.springframework.security.access.prepost.PreAuthorize("@businessPolicy.allow('CHANGE_READ')")
 	public List<ChangeOrderResponse> getHistory(String projectId) {
 		List<ProjectExecutionBudgetItem> budgetItems = budgetItemRepository.findByProjectIdOrderByItemIdAsc(projectId);
 		Map<String, ProjectExecutionBudgetItem> budgetById = budgetItems.stream().collect(Collectors.toMap(ProjectExecutionBudgetItem::getItemId, Function.identity()));
@@ -341,7 +362,7 @@ public class ChangeManagementService {
 	}
 
 	private ChangeOrderResponse response(ChangeOrder order, BigDecimal contractDelta, BigDecimal budgetDelta, BigDecimal poDelta, boolean requiresReconciliation, String message, List<ChangeOrderResponse.Impact> impacts) {
-		return new ChangeOrderResponse(order.getChangeOrderId(), order.getProjectId(), order.getTitle(), order.getReason(), order.getRequestedBy(), order.getStatus(), order.getCreatedAt(), order.getRevisionNumber(), order.hasContractChange(), order.hasBudgetChange(), contractDelta, budgetDelta, poDelta, requiresReconciliation, message, impacts);
+		return new ChangeOrderResponse(order.getChangeOrderId(), order.getProjectId(), order.getTitle(), order.getReason(), order.getCreatedUserId()==null ? "기존 기록 · "+order.getRequestedBy() : order.getRequestedBy(), order.getStatus(), order.getCreatedAt(), order.getRevisionNumber(), order.hasContractChange(), order.hasBudgetChange(), contractDelta, budgetDelta, poDelta, requiresReconciliation, message, impacts);
 	}
 
 	private ChangeOrder requiredOrder(String projectId, String changeOrderId) {
@@ -366,7 +387,7 @@ public class ChangeManagementService {
 
 	private void createApproval(String projectId, String changeCode, String type, String title, BigDecimal delta, BigDecimal previous, String reason) {
 		Approval approval = new Approval(id(), projectId, type, changeCode, changeCode + " " + title,
-				previous.add(delta), previous, delta, "system", reason);
+				previous.add(delta), previous, delta, com.construction.management.auth.CurrentActor.name(), reason);
 		approvalRepository.save(approval);
 		if ("CONTRACT_CHANGE".equals(type)) contractChangeRepository.findByChangeCode(changeCode).forEach(change -> { change.linkApproval(approval.getApprovalId()); contractChangeRepository.save(change); });
 		if ("BUDGET_CHANGE".equals(type)) budgetChangeRepository.findByChangeCode(changeCode).forEach(change -> { change.linkApproval(approval.getApprovalId()); budgetChangeRepository.save(change); });

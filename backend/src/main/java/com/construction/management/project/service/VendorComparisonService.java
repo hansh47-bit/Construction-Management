@@ -31,7 +31,10 @@ import org.springframework.http.HttpStatus;
 import org.springframework.web.server.ResponseStatusException;
 
 @Service
+@org.springframework.security.access.prepost.PreAuthorize("@businessPolicy.allow('PROJECT_READ')")
 public class VendorComparisonService {
+	@org.springframework.beans.factory.annotation.Autowired private com.construction.management.auth.BusinessPolicy businessPolicy;
+
 	private final ProjectRepository projectRepository;
 	private final ProjectRevisionRepository revisionRepository;
 	private final ProjectExecutionBudgetItemRepository budgetItemRepository;
@@ -61,6 +64,7 @@ public class VendorComparisonService {
 	}
 
 	@Transactional(readOnly = true)
+	@org.springframework.security.access.prepost.PreAuthorize("@businessPolicy.allow('PROCUREMENT_READ')")
 	public VendorComparisonResponse getComparisons(String projectId, String itemId) {
 		Project project = getProject(projectId);
 		ProjectExecutionBudgetItem item = getItem(projectId, itemId);
@@ -68,7 +72,10 @@ public class VendorComparisonService {
 	}
 
 	@Transactional
+	@org.springframework.security.access.prepost.PreAuthorize("@businessPolicy.allow('PROCUREMENT_WRITE')")
+	@com.construction.management.auth.BusinessAction
 	public VendorComparisonResponse saveComparisons(String projectId, String itemId, VendorComparisonRequest request) {
+		businessPolicy.draft("PROCUREMENT", projectId, itemId);
 		projectSettlementService.assertNotSettled(projectId);
 		Project project = getProject(projectId);
 		ProjectExecutionBudgetItem item = getItem(projectId, itemId);
@@ -118,9 +125,12 @@ public class VendorComparisonService {
 	}
 
 	@Transactional
+	@org.springframework.security.access.prepost.PreAuthorize("@businessPolicy.allow('PROCUREMENT_WRITE')")
+	@com.construction.management.auth.BusinessAction
 	public com.construction.management.project.api.ApprovalResponse.Attachment uploadAttachment(
 			String projectId, String itemId, String comparisonId, org.springframework.web.multipart.MultipartFile file
 	) {
+		businessPolicy.draft("PROCUREMENT", projectId, itemId);
 		projectSettlementService.assertNotSettled(projectId);
 		getItem(projectId, itemId);
 		String revisionId = currentProcurementRevisionId(projectId);
@@ -136,6 +146,7 @@ public class VendorComparisonService {
 	}
 
 	@Transactional(readOnly = true)
+	@org.springframework.security.access.prepost.PreAuthorize("@businessPolicy.allow('PROCUREMENT_READ')")
 	public PurchaseOrderDraftResponse getPurchaseOrderDraft(String projectId, String itemId) {
 		Project project = getProject(projectId);
 		ProjectExecutionBudgetItem item = getItem(projectId, itemId);
@@ -147,7 +158,10 @@ public class VendorComparisonService {
 	}
 
 	@Transactional
+	@org.springframework.security.access.prepost.PreAuthorize("@businessPolicy.allow('PROCUREMENT_REQUEST')")
+	@com.construction.management.auth.BusinessAction
 	public PurchaseOrderDraftResponse requestPurchaseOrder(String projectId, String itemId) {
+		businessPolicy.draft("PROCUREMENT", projectId, itemId);
 		projectSettlementService.assertNotSettled(projectId);
 		Project project = getProject(projectId);
 		ProjectExecutionBudgetItem item = getItem(projectId, itemId);
@@ -179,7 +193,7 @@ public class VendorComparisonService {
 				selected.getQuotedAmount(),
 				variance,
 				selected.getSelectionReason(),
-				"system"
+				com.construction.management.auth.CurrentActor.name()
 		);
 		requisitionRepository.save(requisition);
 		approvalService.createPurchaseOrderApproval(project, item, requisition, selected.getSelectionReason());

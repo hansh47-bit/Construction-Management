@@ -1,3 +1,6 @@
+import { useEffect, useState } from 'react'
+import { apiJson } from '../../lib/api-client'
+import type { Position } from '../auth/auth'
 import type { FormEvent } from 'react'
 import { X } from 'lucide-react'
 import type { ProjectForm } from '../../types/domain'
@@ -14,6 +17,8 @@ export function ProjectCreationModal({
   onClose: () => void
   onSubmit: (event: FormEvent<HTMLFormElement>) => void
 }) {
+  const [users, setUsers] = useState<{ id: string; name: string; position: Position }[]>([])
+  useEffect(() => { void apiJson<typeof users>('/api/v1/users/options').then(setUsers).catch(() => {}) }, [])
   function update(field: keyof ProjectForm, value: string) {
     setForm({ ...form, [field]: value })
   }
@@ -51,10 +56,10 @@ export function ProjectCreationModal({
             <input type="date" value={form.end_date} onChange={(e) => update('end_date', e.target.value)} className="input" />
           </Field>
           <Field label="담당 팀장">
-            <input value={form.team_leader_id} onChange={(e) => update('team_leader_id', e.target.value)} placeholder="usr_tl_01" className="input" />
+            <select value={form.team_leader_id} onChange={e => update('team_leader_id', e.target.value)} className="input"><option value="">선택 안 함</option>{users.filter(u => u.position === 'TEAM_LEADER').map(u => <option key={u.id} value={u.id}>{u.name}</option>)}</select>
           </Field>
           <Field label="담당자">
-            <input value={form.manager_id} onChange={(e) => update('manager_id', e.target.value)} placeholder="usr_pm_02" className="input" />
+            <select value={form.manager_id} onChange={e => update('manager_id', e.target.value)} className="input"><option value="">선택 안 함</option>{users.map(u => <option key={u.id} value={u.id}>{u.name}</option>)}</select>
           </Field>
           <Field label="비고">
             <input value={form.note} onChange={(e) => update('note', e.target.value)} className="input" />

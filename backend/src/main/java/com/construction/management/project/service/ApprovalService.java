@@ -40,7 +40,10 @@ import org.springframework.util.StringUtils;
 import org.springframework.web.multipart.MultipartFile;
 
 @Service
+@org.springframework.security.access.prepost.PreAuthorize("@businessPolicy.allow('PROJECT_READ')")
 public class ApprovalService {
+	@org.springframework.beans.factory.annotation.Autowired private com.construction.management.auth.BusinessPolicy businessPolicy;
+
 	public static final String TYPE_EXECUTION_BUDGET = "EXECUTION_BUDGET";
 	public static final String TYPE_PURCHASE_ORDER = "PURCHASE_ORDER";
 	public static final String TYPE_PROGRESS_CLAIM = "PROGRESS_CLAIM";
@@ -104,6 +107,7 @@ public class ApprovalService {
 	}
 
 	@Transactional(readOnly = true)
+	@org.springframework.security.access.prepost.PreAuthorize("@businessPolicy.allow('APPROVAL_READ')")
 	public List<ApprovalResponse> search(String status, String type, String projectId) {
 		ApprovalStatus approvalStatus = parseStatus(status);
 		List<Approval> approvals;
@@ -126,12 +130,15 @@ public class ApprovalService {
 		}
 
 		return approvals.stream()
+				.filter(businessPolicy::canSeeApproval)
 				.map(approval -> ApprovalResponse.from(approval, getProject(approval.getProjectId())))
 				.toList();
 	}
 
 	@Transactional(readOnly = true)
+	@org.springframework.security.access.prepost.PreAuthorize("@businessPolicy.allow('APPROVAL_READ')")
 	public ApprovalResponse getApproval(String approvalId) {
+		businessPolicy.approval(approvalId);
 		Approval approval = getApprovalEntity(approvalId);
 		return ApprovalResponse.from(
 				approval,
@@ -142,12 +149,18 @@ public class ApprovalService {
 	}
 
 	@Transactional
+	@org.springframework.security.access.prepost.PreAuthorize("@businessPolicy.allow('BUDGET_REQUEST')")
+	@com.construction.management.auth.BusinessAction
 	public ApprovalResponse requestExecutionBudget(String projectId, ApprovalRequest request) {
+		businessPolicy.draft("BUDGET", projectId, null);
 		return requestExecutionBudget(projectId, request, List.of());
 	}
 
 	@Transactional
+	@org.springframework.security.access.prepost.PreAuthorize("@businessPolicy.allow('BUDGET_REQUEST')")
+	@com.construction.management.auth.BusinessAction
 	public ApprovalResponse requestExecutionBudget(String projectId, ApprovalRequest request, List<MultipartFile> files) {
+		businessPolicy.draft("BUDGET", projectId, null);
 		projectSettlementService.assertNotSettled(projectId);
 		Project project = getProject(projectId);
 		if (project.getStatus() == ProjectStatus.견적) {
@@ -244,6 +257,7 @@ public class ApprovalService {
 				});
 	}
 
+	@org.springframework.security.access.prepost.PreAuthorize("@businessPolicy.allow('PROCUREMENT_REQUEST')")
 	public Approval createPurchaseOrderApproval(Project project, ProjectExecutionBudgetItem item, PoRequisition requisition, String requestReason) {
 		Approval approval = new Approval(
 				nextApprovalId(),
@@ -254,7 +268,7 @@ public class ApprovalService {
 				requisition.getPoAmount(),
 				requisition.getApprovedBudgetAmount(),
 				requisition.getBudgetVariance(),
-				"system",
+				com.construction.management.auth.CurrentActor.name(),
 				requestReason
 		);
 		approvalRepository.save(approval);
@@ -263,6 +277,7 @@ public class ApprovalService {
 		return approval;
 	}
 
+	@org.springframework.security.access.prepost.PreAuthorize("@businessPolicy.allow('PROGRESS_WRITE')")
 	public Approval createProgressClaimApproval(Project project, PurchaseOrder purchaseOrder, ProgressClaim claim, BigDecimal approvedClaimTotal) {
 		Approval approval = new Approval(
 				nextApprovalId(),
@@ -273,7 +288,7 @@ public class ApprovalService {
 				claim.getClaimAmount(),
 				defaultZero(approvedClaimTotal),
 				claim.getClaimAmount().subtract(defaultZero(approvedClaimTotal)),
-				"system",
+				com.construction.management.auth.CurrentActor.name(),
 				purchaseOrder.getPoId() + " 기성 " + claim.getDegree() + "차 승인 요청"
 		);
 		approvalRepository.save(approval);
@@ -283,6 +298,8 @@ public class ApprovalService {
 	}
 
 	@Transactional
+	@org.springframework.security.access.prepost.PreAuthorize("@businessPolicy.allow('APPROVAL_DECIDE')")
+	@com.construction.management.auth.BusinessAction
 	public ApprovalResponse approve(String approvalId, ApprovalDecisionRequest request) {
 		Approval approval = getRequestedApproval(approvalId);
 		if (TYPE_EXECUTION_BUDGET.equals(approval.getApprovalType())) {
@@ -308,6 +325,8 @@ public class ApprovalService {
 	}
 
 	@Transactional
+	@org.springframework.security.access.prepost.PreAuthorize("@businessPolicy.allow('APPROVAL_DECIDE')")
+	@com.construction.management.auth.BusinessAction
 	public ApprovalResponse reject(String approvalId, ApprovalDecisionRequest request) {
 		Approval approval = getRequestedApproval(approvalId);
 		if (request == null || !StringUtils.hasText(request.comment())) {
@@ -347,6 +366,8 @@ public class ApprovalService {
 	}
 
 	@Transactional
+	@org.springframework.security.access.prepost.PreAuthorize("@businessPolicy.allow('APPROVAL_DECIDE')")
+	@com.construction.management.auth.BusinessAction
 	public ApprovalResponse cancelApprovedExecutionBudget(String approvalId, ApprovalDecisionRequest request) {
 		Approval approval = getApprovalEntity(approvalId);
 		if (!TYPE_EXECUTION_BUDGET.equals(approval.getApprovalType())) {
@@ -579,12 +600,10 @@ public class ApprovalService {
 	}
 
 	private static String requestUser(ApprovalRequest request) {
-		return request != null && StringUtils.hasText(request.requestUser()) ? request.requestUser() : "system";
+		return com.construction.management.auth.CurrentActor.name();
 	}
 
-	private static String decisionUser(ApprovalDecisionRequest request) {
-		return request != null && StringUtils.hasText(request.approver()) ? request.approver() : "대표";
-	}
+	private static String decisionUser(ApprovalDecisionRequest request) { return com.construction.management.auth.CurrentActor.name(); }
 
 	private static BigDecimal defaultZero(BigDecimal value) {
 		return value == null ? BigDecimal.ZERO : value;

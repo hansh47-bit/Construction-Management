@@ -19,16 +19,29 @@ import org.springframework.web.multipart.MultipartFile;
 import org.springframework.web.server.ResponseStatusException;
 
 @Service
+@org.springframework.security.access.prepost.PreAuthorize("@businessPolicy.allow('PROJECT_READ')")
 public class MeetingMinutesService {
+	@org.springframework.beans.factory.annotation.Autowired private com.construction.management.auth.BusinessPolicy businessPolicy;
+
 	private final ProjectRepository projectRepository; private final MeetingMinutesRepository meetingRepository; private final MeetingAttendeeRepository attendeeRepository; private final MeetingActionItemRepository actionRepository; private final MeetingAttachmentRepository attachmentRepository; private final Path uploadRoot;
 	public MeetingMinutesService(ProjectRepository projectRepository, MeetingMinutesRepository meetingRepository, MeetingAttendeeRepository attendeeRepository, MeetingActionItemRepository actionRepository, MeetingAttachmentRepository attachmentRepository, @Value("${app.site-record.upload-dir:uploads/site-records}") String uploadDir) { this.projectRepository = projectRepository; this.meetingRepository = meetingRepository; this.attendeeRepository = attendeeRepository; this.actionRepository = actionRepository; this.attachmentRepository = attachmentRepository; this.uploadRoot = Path.of(uploadDir).toAbsolutePath().normalize(); }
 
-	@Transactional(readOnly = true) public List<MeetingMinutesResponse> list(String projectId) { ensureProject(projectId); return meetingRepository.findByProjectIdOrderByMeetingAtDesc(projectId).stream().filter(m -> !"DELETED".equals(m.getStatus())).map(this::toResponse).toList(); }
-	@Transactional(readOnly = true) public MeetingMinutesResponse get(String projectId, String meetingId) { return toResponse(getMeeting(projectId, meetingId)); }
-	@Transactional public MeetingMinutesResponse create(String projectId, MeetingMinutesRequest request) { ensureWritable(projectId); String author = author(request.createdBy()); MeetingMinutes meeting = new MeetingMinutes("MIN-" + UUID.randomUUID().toString().replace("-", ""), projectId, request.meetingAt(), author); apply(meeting, request, author); meetingRepository.save(meeting); replaceChildren(meeting.getMeetingId(), request); return toResponse(meeting); }
-	@Transactional public MeetingMinutesResponse update(String projectId, String meetingId, MeetingMinutesRequest request) { ensureWritable(projectId); MeetingMinutes meeting = getMeeting(projectId, meetingId); if ("DELETED".equals(meeting.getStatus())) throw new ResponseStatusException(HttpStatus.CONFLICT, "삭제된 회의록은 수정할 수 없습니다."); apply(meeting, request, author(request.createdBy())); replaceChildren(meetingId, request); return toResponse(meeting); }
+	@Transactional(readOnly = true) @org.springframework.security.access.prepost.PreAuthorize("@businessPolicy.allow('SITE_READ')")
+	public List<MeetingMinutesResponse> list(String projectId) { ensureProject(projectId); return meetingRepository.findByProjectIdOrderByMeetingAtDesc(projectId).stream().filter(m -> !"DELETED".equals(m.getStatus())).map(this::toResponse).toList(); }
+	@Transactional(readOnly = true) @org.springframework.security.access.prepost.PreAuthorize("@businessPolicy.allow('SITE_READ')")
+	public MeetingMinutesResponse get(String projectId, String meetingId) { return toResponse(getMeeting(projectId, meetingId)); }
+	@Transactional @org.springframework.security.access.prepost.PreAuthorize("@businessPolicy.allow('SITE_WRITE')")
+	@com.construction.management.auth.BusinessAction
+	public MeetingMinutesResponse create(String projectId, MeetingMinutesRequest request) { ensureWritable(projectId); String author = author(request.createdBy()); MeetingMinutes meeting = new MeetingMinutes("MIN-" + UUID.randomUUID().toString().replace("-", ""), projectId, request.meetingAt(), author); apply(meeting, request, author); meetingRepository.save(meeting); replaceChildren(meeting.getMeetingId(), request); return toResponse(meeting); }
+	@Transactional @org.springframework.security.access.prepost.PreAuthorize("@businessPolicy.allow('SITE_WRITE')")
+	@com.construction.management.auth.BusinessAction
+	public MeetingMinutesResponse update(String projectId, String meetingId, MeetingMinutesRequest request) {
+		businessPolicy.ownEntity(com.construction.management.project.domain.MeetingMinutes.class, meetingId); ensureWritable(projectId); MeetingMinutes meeting = getMeeting(projectId, meetingId); if ("DELETED".equals(meeting.getStatus())) throw new ResponseStatusException(HttpStatus.CONFLICT, "삭제된 회의록은 수정할 수 없습니다."); apply(meeting, request, author(request.createdBy())); replaceChildren(meetingId, request); return toResponse(meeting); }
 
-	@Transactional public MeetingMinutesResponse uploadAttachment(String projectId, String meetingId, MultipartFile file, String uploadedBy) {
+	@Transactional @org.springframework.security.access.prepost.PreAuthorize("@businessPolicy.allow('SITE_WRITE')")
+	@com.construction.management.auth.BusinessAction
+	public MeetingMinutesResponse uploadAttachment(String projectId, String meetingId, MultipartFile file, String uploadedBy) {
+		businessPolicy.ownEntity(com.construction.management.project.domain.MeetingMinutes.class, meetingId);
 		ensureWritable(projectId); MeetingMinutes meeting = getMeeting(projectId, meetingId); if (file == null || file.isEmpty()) throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "업로드할 파일을 선택하세요.");
 		String originalName = cleanName(file.getOriginalFilename(), "meeting-attachment"); String extension = extension(originalName);
 		if (!Set.of("pdf", "doc", "docx", "xls", "xlsx", "csv", "jpg", "jpeg", "png", "webp").contains(extension)) throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "PDF, 문서, 도면 또는 이미지 파일만 첨부할 수 있습니다.");
@@ -36,10 +49,18 @@ public class MeetingMinutesService {
 		attachmentRepository.save(new MeetingAttachment("MFA-" + UUID.randomUUID().toString().replace("-", ""), meetingId, target.toString(), originalName, mimeType, file.getSize(), author(uploadedBy)));
 		return toResponse(meeting);
 	}
-	@Transactional public MeetingMinutesResponse deleteAttachment(String projectId, String meetingId, String attachmentId) { ensureWritable(projectId); MeetingMinutes meeting = getMeeting(projectId, meetingId); MeetingAttachment attachment = attachmentRepository.findById(attachmentId).orElseThrow(() -> new EntityNotFoundException("회의 첨부파일을 찾을 수 없습니다.")); if (!meetingId.equals(attachment.getMeetingId())) throw new EntityNotFoundException("해당 회의록의 첨부파일이 아닙니다."); deleteStoredFile(attachment.getStorageKey()); attachmentRepository.delete(attachment); return toResponse(meeting); }
-	@Transactional(readOnly = true) public Resource loadAttachment(String projectId, String meetingId, String attachmentId) { getMeeting(projectId, meetingId); MeetingAttachment attachment = attachmentRepository.findById(attachmentId).orElseThrow(() -> new EntityNotFoundException("회의 첨부파일을 찾을 수 없습니다.")); if (!meetingId.equals(attachment.getMeetingId())) throw new EntityNotFoundException("해당 회의록의 첨부파일이 아닙니다."); return loadStoredFile(attachment.getStorageKey()); }
-	@Transactional public void delete(String projectId, String meetingId) { ensureWritable(projectId); MeetingMinutes meeting = getMeeting(projectId, meetingId); if (!"DRAFT".equals(meeting.getStatus())) { meeting.update(meeting.getMeetingAt(), meeting.getLocation(), meeting.getSubject(), meeting.getAgendaContent(), meeting.getDecisionContent(), "DELETED", "system"); return; } deleteAllFiles(meetingId); attendeeRepository.deleteByMeetingId(meetingId); actionRepository.deleteByMeetingId(meetingId); meetingRepository.delete(meeting); }
-	@Transactional public void deleteAllForProject(String projectId) { for (MeetingMinutes meeting : meetingRepository.findByProjectIdOrderByMeetingAtDesc(projectId)) { deleteAllFiles(meeting.getMeetingId()); attendeeRepository.deleteByMeetingId(meeting.getMeetingId()); actionRepository.deleteByMeetingId(meeting.getMeetingId()); } meetingRepository.deleteByProjectId(projectId); }
+	@Transactional @org.springframework.security.access.prepost.PreAuthorize("@businessPolicy.allow('SITE_WRITE')")
+	@com.construction.management.auth.BusinessAction
+	public MeetingMinutesResponse deleteAttachment(String projectId, String meetingId, String attachmentId) {
+		businessPolicy.ownEntity(com.construction.management.project.domain.MeetingMinutes.class, meetingId); ensureWritable(projectId); MeetingMinutes meeting = getMeeting(projectId, meetingId); MeetingAttachment attachment = attachmentRepository.findById(attachmentId).orElseThrow(() -> new EntityNotFoundException("회의 첨부파일을 찾을 수 없습니다.")); if (!meetingId.equals(attachment.getMeetingId())) throw new EntityNotFoundException("해당 회의록의 첨부파일이 아닙니다."); deleteStoredFile(attachment.getStorageKey()); attachmentRepository.delete(attachment); return toResponse(meeting); }
+	@Transactional(readOnly = true) @org.springframework.security.access.prepost.PreAuthorize("@businessPolicy.allow('SITE_READ')")
+	public Resource loadAttachment(String projectId, String meetingId, String attachmentId) { getMeeting(projectId, meetingId); MeetingAttachment attachment = attachmentRepository.findById(attachmentId).orElseThrow(() -> new EntityNotFoundException("회의 첨부파일을 찾을 수 없습니다.")); if (!meetingId.equals(attachment.getMeetingId())) throw new EntityNotFoundException("해당 회의록의 첨부파일이 아닙니다."); return loadStoredFile(attachment.getStorageKey()); }
+	@Transactional @org.springframework.security.access.prepost.PreAuthorize("@businessPolicy.allow('SITE_WRITE')")
+	@com.construction.management.auth.BusinessAction
+	public void delete(String projectId, String meetingId) {
+		businessPolicy.ownEntity(com.construction.management.project.domain.MeetingMinutes.class, meetingId); ensureWritable(projectId); MeetingMinutes meeting = getMeeting(projectId, meetingId); if (!"DRAFT".equals(meeting.getStatus())) { meeting.update(meeting.getMeetingAt(), meeting.getLocation(), meeting.getSubject(), meeting.getAgendaContent(), meeting.getDecisionContent(), "DELETED", com.construction.management.auth.CurrentActor.name()); return; } deleteAllFiles(meetingId); attendeeRepository.deleteByMeetingId(meetingId); actionRepository.deleteByMeetingId(meetingId); meetingRepository.delete(meeting); }
+	@Transactional @org.springframework.security.access.prepost.PreAuthorize("@businessPolicy.allow('PROJECT_DELETE')")
+	public void deleteAllForProject(String projectId) { for (MeetingMinutes meeting : meetingRepository.findByProjectIdOrderByMeetingAtDesc(projectId)) { deleteAllFiles(meeting.getMeetingId()); attendeeRepository.deleteByMeetingId(meeting.getMeetingId()); actionRepository.deleteByMeetingId(meeting.getMeetingId()); } meetingRepository.deleteByProjectId(projectId); }
 
 	private void apply(MeetingMinutes meeting, MeetingMinutesRequest request, String author) { meeting.update(request.meetingAt(), trim(request.location()), request.subject().trim(), sanitizeRichText(request.agendaContent()), sanitizeRichText(request.decisionContent()), status(request.status()), author); }
 	private void replaceChildren(String meetingId, MeetingMinutesRequest request) {
@@ -51,7 +72,7 @@ public class MeetingMinutesService {
 	}
 	private MeetingMinutesResponse toResponse(MeetingMinutes meeting) {
 		String id = meeting.getMeetingId(); List<MeetingActionItem> actions = actionRepository.findByMeetingIdOrderBySortOrderAsc(id);
-		return new MeetingMinutesResponse(id, meeting.getProjectId(), meeting.getMeetingAt(), meeting.getLocation(), meeting.getSubject(), meeting.getAgendaContent(), meeting.getDecisionContent(), meeting.getStatus(), meeting.getCreatedBy(), meeting.getCreatedAt(), meeting.getUpdatedAt(), actions.stream().filter(a -> !"DONE".equals(a.getStatus())).count(),
+		return new MeetingMinutesResponse(id, meeting.getProjectId(), meeting.getMeetingAt(), meeting.getLocation(), meeting.getSubject(), meeting.getAgendaContent(), meeting.getDecisionContent(), meeting.getStatus(), meeting.getCreatedUserId()==null ? "기존 기록 · "+meeting.getCreatedBy() : meeting.getCreatedBy(), meeting.getCreatedUserId(), meeting.getCreatedAt(), meeting.getUpdatedAt(), actions.stream().filter(a -> !"DONE".equals(a.getStatus())).count(),
 				attendeeRepository.findByMeetingIdOrderBySortOrderAsc(id).stream().map(a -> new MeetingMinutesResponse.Attendee(a.getId(), a.getOrganizationType(), a.getOrganizationName(), a.getAttendeeName(), a.getPositionName(), a.getContact())).toList(),
 				actions.stream().map(a -> new MeetingMinutesResponse.ActionItem(a.getId(), a.getActionContent(), a.getAssigneeName(), a.getAssigneeUserId(), a.getDueDate(), a.getStatus(), a.getCompletedAt())).toList(),
 				attachmentRepository.findByMeetingIdOrderByUploadedAtDesc(id).stream().map(a -> new MeetingMinutesResponse.Attachment(a.getAttachmentId(), a.getOriginalFileName(), a.getMimeType(), a.getFileSize(), "/api/v1/projects/" + meeting.getProjectId() + "/meeting-minutes/" + id + "/attachments/" + a.getAttachmentId(), a.getUploadedAt())).toList());
@@ -75,7 +96,7 @@ public class MeetingMinutesService {
 	private static String status(String value) { return Set.of("DRAFT", "SHARED", "ARCHIVED").contains(value) ? value : "DRAFT"; }
 	private static String actionStatus(String value) { return Set.of("TODO", "IN_PROGRESS", "DONE").contains(value) ? value : "TODO"; }
 	private static String organizationType(String value) { return Set.of("CLIENT", "CONTRACTOR", "VENDOR", "OTHER").contains(value) ? value : "OTHER"; }
-	private static String author(String value) { return StringUtils.hasText(value) ? value.trim() : "현장 담당자"; }
+	private static String author(String value) { return com.construction.management.auth.CurrentActor.name(); }
 	private static String trim(String value) { return value == null ? null : value.trim(); }
 	private static String cleanName(String value, String fallback) { String name = StringUtils.cleanPath(value == null ? fallback : value); return StringUtils.hasText(name) ? name : fallback; }
 	private static String extension(String value) { int pos = value.lastIndexOf('.'); return pos < 0 ? "" : value.substring(pos + 1).toLowerCase(Locale.ROOT); }

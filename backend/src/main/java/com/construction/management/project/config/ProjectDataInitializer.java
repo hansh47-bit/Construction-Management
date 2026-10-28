@@ -32,6 +32,7 @@ import org.springframework.boot.CommandLineRunner;
 import org.springframework.stereotype.Component;
 
 @Component
+@org.springframework.boot.autoconfigure.condition.ConditionalOnProperty(name="app.demo-data.enabled", havingValue="true")
 public class ProjectDataInitializer implements CommandLineRunner {
 
 	private final ProjectRepository projectRepository;

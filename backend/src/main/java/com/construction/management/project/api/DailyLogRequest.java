@@ -8,6 +8,7 @@ import java.math.BigDecimal;
 import java.time.LocalDate;
 import java.util.List;
 
+@com.fasterxml.jackson.annotation.JsonIgnoreProperties(ignoreUnknown=true)
 public record DailyLogRequest(
 		@JsonProperty("log_date") @NotNull LocalDate logDate,
 		@JsonProperty("weather_condition") String weatherCondition,
@@ -28,7 +29,10 @@ public record DailyLogRequest(
 ) {
 	// The editor starts with blank rows for convenience. They are optional and the
 	// service omits rows without a trade, equipment name, or material name.
-	public record LaborEntry(@JsonProperty("trade_name") String tradeName, @JsonProperty("workforce_type") String workforceType, @JsonProperty("vendor_name") String vendorName, BigDecimal headcount, String note) { }
-	public record EquipmentEntry(@JsonProperty("equipment_name") String equipmentName, BigDecimal quantity, String note) { }
-	public record MaterialEntry(@JsonProperty("entry_type") String entryType, @JsonProperty("item_name") String itemName, BigDecimal quantity, String unit, String note) { }
+	@com.fasterxml.jackson.annotation.JsonIgnoreProperties(ignoreUnknown=true)
+public record LaborEntry(@JsonProperty("trade_name") String tradeName, @JsonProperty("workforce_type") String workforceType, @JsonProperty("vendor_name") String vendorName, BigDecimal headcount, String note) { }
+	@com.fasterxml.jackson.annotation.JsonIgnoreProperties(ignoreUnknown=true)
+public record EquipmentEntry(@JsonProperty("equipment_name") String equipmentName, BigDecimal quantity, String note) { }
+	@com.fasterxml.jackson.annotation.JsonIgnoreProperties(ignoreUnknown=true)
+public record MaterialEntry(@JsonProperty("entry_type") String entryType, @JsonProperty("item_name") String itemName, BigDecimal quantity, String unit, String note) { }
 }

@@ -8,7 +8,7 @@ import java.math.BigDecimal;
 
 @Entity
 @Table(name = "project_contracts")
-public class ProjectContract {
+public class ProjectContract extends com.construction.management.auth.AuthoredEntity {
 
 	@Id
 	@Column(name = "contract_id", nullable = false, length = 64)

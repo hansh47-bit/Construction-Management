@@ -1980,3 +1980,6 @@ backend/uploads/
 /backend/.gradle-user-home/wrapper/dists/gradle-9.7.1-bin/1w1c7tv4s851m17nbqdsro2tv/gradle-9.7.1-bin.zip.lck
 /backend/.gradle-user-home/wrapper/dists/gradle-9.7.1-bin/1w1c7tv4s851m17nbqdsro2tv/gradle-9.7.1-bin.zip.ok
 /backend/.gradle-user-home/wrapper/dists/CACHEDIR.TAG
+
+/.playwright-cli/
+/output/playwright/

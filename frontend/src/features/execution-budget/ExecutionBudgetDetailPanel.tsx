@@ -1,3 +1,4 @@
+import { PermissionGate } from '../auth/Permissions'
 import { AlertTriangle, ArrowLeft, ArrowRight, Download, FileSpreadsheet, FileText, Plus, Save, Trash2, Upload } from 'lucide-react'
 import { useState } from 'react'
 import { MetricPanel } from '../../components/ui/Metrics'
@@ -285,14 +286,14 @@ export function ExecutionBudgetDetailPanel({
             <span className="text-sm text-slate-600">{approvalFiles.map((file) => file.name).join(', ')}</span>
           )}
         </div>
-        <button
+        <PermissionGate permission="BUDGET_REQUEST"><button
           type="button"
           onClick={requestExecutionBudgetApproval}
           disabled={isLocked || details.length === 0 || totalAmount <= 0}
           className="mt-4 mr-2 inline-flex items-center gap-2 rounded-md bg-cyan-700 px-3 py-2 text-sm font-semibold text-white hover:bg-cyan-800 disabled:cursor-not-allowed disabled:bg-slate-300"
         >
           결재요청
-        </button>
+        </button></PermissionGate>
         <button
           type="button"
           onClick={() => addExecutionDetail()}

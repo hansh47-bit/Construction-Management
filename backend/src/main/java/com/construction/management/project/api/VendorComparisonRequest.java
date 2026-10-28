@@ -6,8 +6,10 @@ import jakarta.validation.constraints.NotNull;
 import java.math.BigDecimal;
 import java.util.List;
 
+@com.fasterxml.jackson.annotation.JsonIgnoreProperties(ignoreUnknown=true)
 public record VendorComparisonRequest(@Valid @NotNull List<Item> comparisons) {
-	public record Item(
+	@com.fasterxml.jackson.annotation.JsonIgnoreProperties(ignoreUnknown=true)
+public record Item(
 			@JsonProperty("comparison_code") String comparisonCode,
 			@JsonProperty("vendor_name") String vendorName,
 			@JsonProperty("quoted_amount") BigDecimal quotedAmount,

@@ -11,7 +11,7 @@ import java.time.LocalDateTime;
 
 @Entity
 @Table(name = "vendor_comparisons")
-public class VendorComparison {
+public class VendorComparison extends com.construction.management.auth.AuthoredEntity {
 
 	@Id
 	@Column(name = "comparison_id", nullable = false, length = 64)

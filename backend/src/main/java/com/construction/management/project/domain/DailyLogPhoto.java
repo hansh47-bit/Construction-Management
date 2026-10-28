@@ -4,7 +4,7 @@ import jakarta.persistence.*;
 import java.time.LocalDateTime;
 
 @Entity @Table(name = "daily_log_photos")
-public class DailyLogPhoto {
+public class DailyLogPhoto extends com.construction.management.auth.AuthoredEntity {
 	@Id @Column(name = "photo_id", length = 64) private String photoId;
 	@Column(name = "daily_log_id", nullable = false, length = 64) private String dailyLogId;
 	@Column(nullable = false, length = 16) private String phase;

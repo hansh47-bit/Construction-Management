@@ -1,9 +1,16 @@
+import { useState } from 'react'
+import { useAuth } from '../auth/auth'
+import { paymentApi } from './api'
+import type { ClaimStatus } from '../../types/domain'
+import { PermissionGate } from '../auth/Permissions'
 import { MetricPanel } from '../../components/ui/Metrics'
 import { MoneyInput } from '../../components/ui/MoneyInput'
 import { formatWorkflowStatus, formatWon, toNumber } from '../../lib/format'
 import type { ProgressPaymentResponse } from '../../types/domain'
 
 export function ProgressPaymentPanel({
+  projectId,
+  onPaymentRecorded,
   progressPayment,
   selectedPoId,
   setSelectedPoId,
@@ -15,6 +22,8 @@ export function ProgressPaymentPanel({
   deleteProgressClaim,
   requestPaymentApprovals,
 }: {
+  projectId: string
+  onPaymentRecorded: () => void
   progressPayment: ProgressPaymentResponse
   selectedPoId: string
   setSelectedPoId: (value: string) => void
@@ -26,6 +35,8 @@ export function ProgressPaymentPanel({
   deleteProgressClaim: (claimId: string) => void
   requestPaymentApprovals: () => void
 }) {
+  const { user } = useAuth()
+  const [paying, setPaying] = useState<ClaimStatus | null>(null)
   const selectedPo = progressPayment.purchaseOrders.find((po) => po.po_id === selectedPoId) ?? progressPayment.purchaseOrders[0]
   const selectedPoSequence = Math.max(1, progressPayment.purchaseOrders.findIndex((po) => po.po_id === selectedPo?.po_id) + 1)
   const paymentRows = progressPayment.purchaseOrders.flatMap((po) => po.claims.map((claim) => ({ po, claim })))
@@ -70,7 +81,7 @@ export function ProgressPaymentPanel({
           <p className="mt-1 text-sm text-slate-500">프로젝트 전체 업체별 기성·지급 현황을 확인하고, 선택 업체만 지급결재를 요청합니다.</p>
           <p className="mt-1 text-sm font-medium text-cyan-800">기성 승인·반려는 통합결재함에서 처리합니다.</p>
         </div>
-        <button type="button" onClick={requestPaymentApprovals} disabled={selectedPaymentPoIds.length === 0} className="rounded-md bg-cyan-700 px-4 py-2 text-sm font-semibold text-white hover:bg-cyan-800 disabled:cursor-not-allowed disabled:bg-slate-300">선택 업체 지급요청 ({selectedPaymentPoIds.length})</button>
+        <PermissionGate permission="PAYMENT_REQUEST"><button type="button" onClick={requestPaymentApprovals} disabled={selectedPaymentPoIds.length === 0} className="rounded-md bg-cyan-700 px-4 py-2 text-sm font-semibold text-white hover:bg-cyan-800 disabled:cursor-not-allowed disabled:bg-slate-300">선택 업체 지급요청 ({selectedPaymentPoIds.length})</button></PermissionGate>
       </div>
 
       <div className="grid gap-3 border-b border-slate-200 py-5 md:grid-cols-3">
@@ -78,7 +89,7 @@ export function ProgressPaymentPanel({
         <MetricPanel label="기성 승인 요청 합계" value={formatWon(requestedProgressClaimTotal)} helper="통합결재함 승인 대기 기성" accent={requestedProgressClaimTotal > 0 ? 'text-amber-700' : 'text-slate-950'} />
         <MetricPanel label="기성 승인 요청 전 합계" value={formatWon(beforeProgressRequestTotal)} helper="아직 기성 승인 요청하지 않은 발주 잔액" />
         <MetricPanel label="승인 기성누계" value={formatWon(totalApprovedClaims)} helper="전체 업체 합계" />
-        <MetricPanel label="실제 지급누계" value={formatWon(totalPaid)} helper="지급결재 승인 반영" />
+        <MetricPanel label="실제 지급누계" value={formatWon(totalPaid)} helper="재무의 실제 지급 등록 합계" />
         <MetricPanel label="전체 승인 후 미지급" value={formatWon(totalApprovedClaims - totalPaid)} helper="지급요청 가능한 금액" accent={totalApprovedClaims > totalPaid ? 'text-rose-700' : 'text-slate-950'} />
         <MetricPanel label="준공정산 이동 조건" value={progressPayment.all_payments_approved ? '충족' : '미충족'} helper="모든 확정 발주 지급 완료 기준" accent={progressPayment.all_payments_approved ? 'text-cyan-700' : 'text-slate-700'} />
       </div>
@@ -145,7 +156,7 @@ export function ProgressPaymentPanel({
           <MoneyInput value={toNumber(claimForm.claim_amount)} onChange={(value) => setClaimForm({ ...claimForm, claim_amount: value })} />
           <p className="mt-1 text-xs font-medium text-slate-500">선택한 발주의 현재 계약금액이 자동 입력되며, 필요하면 직접 수정할 수 있습니다.</p>
         </label>
-        <button type="button" onClick={createProgressClaim} className="self-end rounded-md bg-slate-900 px-4 py-2 text-sm font-semibold text-white hover:bg-slate-800">기성금액 작성</button>
+        <PermissionGate permission="PROGRESS_WRITE"><button type="button" onClick={createProgressClaim} className="self-end rounded-md bg-slate-900 px-4 py-2 text-sm font-semibold text-white hover:bg-slate-800">기성금액 작성</button></PermissionGate>
       </div>
 
       <div className="py-5">
@@ -182,12 +193,12 @@ export function ProgressPaymentPanel({
                   <td className="px-3 py-3">
                     <div className="flex items-center gap-2">
                       <span>{formatWon(claim.remaining_payable)}</span>
-                      {(claim.approval_status === 'REQUESTED' || claim.approval_status === 'REJECTED') && (
-                        <button type="button" onClick={() => deleteProgressClaim(claim.claim_id)} className="rounded border border-rose-300 px-2 py-1 text-xs font-semibold text-rose-700 hover:bg-rose-50">삭제</button>
+                      {(user?.position !== 'STAFF' || claim.created_user_id === user.id) && (claim.approval_status === 'REQUESTED' || claim.approval_status === 'REJECTED') && (
+                        <PermissionGate permission="PROGRESS_WRITE"><button type="button" onClick={() => deleteProgressClaim(claim.claim_id)} className="rounded border border-rose-300 px-2 py-1 text-xs font-semibold text-rose-700 hover:bg-rose-50">삭제</button></PermissionGate>
                       )}
                     </div>
                   </td>
-                  <td className="px-3 py-3 text-xs font-semibold text-slate-600">{claim.approval_status === 'REQUESTED' ? '통합결재함 승인 대기' : claim.approval_status === 'REJECTED' ? '통합결재함 반려' : '-'}</td>
+                  <td className="px-3 py-3 text-xs font-semibold text-slate-600">{claim.approval_status === 'APPROVED' && claim.remaining_payable > 0 && <PermissionGate permission="PAYMENT_EXECUTE"><button type="button" onClick={() => setPaying(claim)} className="mb-2 block rounded bg-blue-700 px-3 py-2 text-white">실제 지급 등록</button></PermissionGate>}{claim.approval_status === 'REQUESTED' ? '통합결재함 승인 대기' : claim.approval_status === 'REJECTED' ? '통합결재함 반려' : '-'}</td>
                 </tr>
               ))}
               {paymentRows.length === 0 && <tr><td colSpan={11} className="px-3 py-8 text-center text-slate-500">등록된 기성 차수가 없습니다.</td></tr>}
@@ -195,6 +206,13 @@ export function ProgressPaymentPanel({
           </table>
         </div>
       </div>
+      {paying && <PaymentForm projectId={projectId} claim={paying} close={() => setPaying(null)} saved={() => { setPaying(null); onPaymentRecorded() }} />}
     </div>
   )
+}
+
+function PaymentForm({ projectId, claim, close, saved }: { projectId: string; claim: ClaimStatus; close: () => void; saved: () => void }) {
+ const [amount, setAmount] = useState(String(claim.remaining_payable)); const [date, setDate] = useState(new Date().toISOString().slice(0, 10)); const [account, setAccount] = useState(''); const [proof, setProof] = useState(''); const [busy, setBusy] = useState(false); const [error, setError] = useState('')
+ async function save() { if (busy) return; setBusy(true); try { const response = await paymentApi.createPayment(projectId, claim.claim_id, { paid_amount: Number(amount), paid_date: date, account_info: account, receipt_link: proof }); if (!response.ok) { const body = await response.json() as { message?: string }; throw new Error(body.message ?? '지급 등록 실패') }; saved() } catch (e) { setError((e as Error).message) } finally { setBusy(false) } }
+ return <div className="fixed inset-0 z-50 grid place-items-center bg-slate-950/40 p-4"><form className="w-full max-w-lg space-y-4 rounded-xl bg-white p-6 shadow-xl" onSubmit={e => { e.preventDefault(); void save() }}><h2 className="text-xl font-bold">실제 지급 등록</h2><p className="text-sm text-slate-600">실제 송금한 금액과 날짜를 등록하세요. 승인 기성 잔액: {formatWon(claim.remaining_payable)}</p>{error && <p role="alert" className="text-sm text-rose-700">{error}</p>}<label className="block text-sm font-semibold">지급금액<input required type="number" min="1" max={claim.remaining_payable} value={amount} onChange={e => setAmount(e.target.value)} className="input mt-1" /></label><label className="block text-sm font-semibold">실제 지급일<input required type="date" value={date} onChange={e => setDate(e.target.value)} className="input mt-1" /></label><label className="block text-sm font-semibold">지급 계좌·내용<input value={account} onChange={e => setAccount(e.target.value)} className="input mt-1" /></label><label className="block text-sm font-semibold">지급 증빙 링크<input value={proof} onChange={e => setProof(e.target.value)} className="input mt-1" /></label><div className="flex justify-end gap-2"><button type="button" onClick={close} className="rounded border px-4 py-2">취소</button><button disabled={busy} className="rounded bg-blue-700 px-4 py-2 text-white disabled:opacity-40">{busy ? '등록 중…' : '지급 등록'}</button></div></form></div>
 }

@@ -11,7 +11,7 @@ import java.time.LocalDateTime;
 
 @Entity
 @Table(name = "daily_logs")
-public class DailyLog {
+public class DailyLog extends com.construction.management.auth.AuthoredEntity {
 
 	@Id
 	@Column(name = "daily_log_id", nullable = false, length = 64)

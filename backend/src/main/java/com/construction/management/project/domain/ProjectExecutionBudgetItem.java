@@ -11,7 +11,7 @@ import java.time.LocalDateTime;
 
 @Entity
 @Table(name = "project_execution_budget_items")
-public class ProjectExecutionBudgetItem {
+public class ProjectExecutionBudgetItem extends com.construction.management.auth.AuthoredEntity {
 	private static final String PROJECT_ITEM_SEPARATOR = "::";
 
 	@Id

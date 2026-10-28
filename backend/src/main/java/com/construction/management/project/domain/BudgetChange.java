@@ -10,7 +10,7 @@ import java.math.BigDecimal;
 
 @Entity
 @Table(name = "budget_changes")
-public class BudgetChange {
+public class BudgetChange extends com.construction.management.auth.AuthoredEntity {
 
 	@Id
 	@Column(name = "change_id", nullable = false, length = 64)

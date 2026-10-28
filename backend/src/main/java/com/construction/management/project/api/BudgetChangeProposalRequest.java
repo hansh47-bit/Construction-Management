@@ -7,6 +7,8 @@ import jakarta.validation.constraints.NotNull;
 import java.math.BigDecimal;
 import java.util.List;
 
+@com.fasterxml.jackson.annotation.JsonIgnoreProperties(ignoreUnknown=true)
 public record BudgetChangeProposalRequest(@NotEmpty List<@Valid Item> items) {
-	public record Item(@NotBlank String budgetItemId, @NotNull BigDecimal changeAmount) { }
+	@com.fasterxml.jackson.annotation.JsonIgnoreProperties(ignoreUnknown=true)
+public record Item(@NotBlank String budgetItemId, @NotNull BigDecimal changeAmount) { }
 }

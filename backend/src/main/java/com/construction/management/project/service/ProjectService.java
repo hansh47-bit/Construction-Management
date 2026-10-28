@@ -62,7 +62,11 @@ import org.springframework.http.HttpStatus;
 import org.springframework.web.server.ResponseStatusException;
 
 @Service
+@org.springframework.security.access.prepost.PreAuthorize("@businessPolicy.allow('PROJECT_READ')")
 public class ProjectService {
+	@org.springframework.beans.factory.annotation.Autowired private com.construction.management.auth.BusinessPolicy businessPolicy;
+	@org.springframework.beans.factory.annotation.Autowired private com.construction.management.account.AccountService accountService;
+
 
 	private static final ZoneId KOREA_ZONE_ID = ZoneId.of("Asia/Seoul");
 	private static final DateTimeFormatter PROJECT_CODE_DATE_FORMAT = DateTimeFormatter.BASIC_ISO_DATE;
@@ -148,7 +152,10 @@ public class ProjectService {
 	}
 
 	@Transactional
+	@org.springframework.security.access.prepost.PreAuthorize("@businessPolicy.allow('PROJECT_CREATE')")
+	@com.construction.management.auth.BusinessAction
 	public ProjectResponse create(ProjectCreateRequest request) {
+		accountService.validateAssignee(request.teamLeaderId(), com.construction.management.account.Position.TEAM_LEADER); accountService.validateAssignee(request.managerId(), null);
 		String projectCode = nextProjectCode();
 
 		Project project = new Project(toProjectId(projectCode), projectCode, request.projectName())
@@ -184,12 +191,15 @@ public class ProjectService {
 					.map(CustomerContractItem::getTotalAmount)
 					.map(ProjectService::defaultZero)
 					.reduce(BigDecimal.ZERO, BigDecimal::add);
-			return ProjectResponse.from(project, supplyAmount, totalAmount);
+			return ProjectResponse.from(project, supplyAmount, totalAmount, accountService.displayName(project.getTeamLeaderId()), accountService.displayName(project.getManagerId()));
 		}).toList();
 	}
 
 	@Transactional
+	@org.springframework.security.access.prepost.PreAuthorize("@businessPolicy.allow('PROJECT_DELETE')")
+	@com.construction.management.auth.BusinessAction
 	public void delete(String projectId) {
+		businessPolicy.deletableProject(projectId);
 		Project project = projectRepository.findById(projectId)
 				.orElseThrow(() -> new EntityNotFoundException("프로젝트를 찾을 수 없습니다: " + projectId));
 
@@ -243,6 +253,8 @@ public class ProjectService {
 	}
 
 	@Transactional
+	@org.springframework.security.access.prepost.PreAuthorize("@businessPolicy.allow('PROJECT_STATUS')")
+	@com.construction.management.auth.BusinessAction
 	public ProjectResponse startConstruction(String projectId) {
 		Project project = projectRepository.findById(projectId)
 				.orElseThrow(() -> new EntityNotFoundException("프로젝트를 찾을 수 없습니다: " + projectId));
@@ -257,6 +269,8 @@ public class ProjectService {
 	}
 
 	@Transactional
+	@org.springframework.security.access.prepost.PreAuthorize("@businessPolicy.allow('PROJECT_STATUS')")
+	@com.construction.management.auth.BusinessAction
 	public ProjectResponse synchronizePreparationStatus(String projectId) {
 		Project project = projectRepository.findById(projectId)
 				.orElseThrow(() -> new EntityNotFoundException("프로젝트를 찾을 수 없습니다: " + projectId));

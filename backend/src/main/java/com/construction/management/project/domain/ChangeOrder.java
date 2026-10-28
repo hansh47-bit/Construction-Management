@@ -8,7 +8,7 @@ import java.time.LocalDateTime;
 
 @Entity
 @Table(name = "change_orders")
-public class ChangeOrder {
+public class ChangeOrder extends com.construction.management.auth.AuthoredEntity {
 
 	@Id
 	@Column(name = "change_order_id", nullable = false, length = 64)

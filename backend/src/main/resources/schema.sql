@@ -206,3 +206,8 @@ CREATE TABLE IF NOT EXISTS meeting_attachments (
 	original_file_name VARCHAR(1000) NOT NULL, mime_type VARCHAR(255) NOT NULL, file_size BIGINT NOT NULL,
 	uploaded_by VARCHAR(255) NOT NULL, uploaded_at TIMESTAMP NOT NULL
 );
+
+-- Serialize explicit first-admin bootstrap across concurrent application processes.
+CREATE TABLE IF NOT EXISTS security_locks (id VARCHAR(64) PRIMARY KEY);
+INSERT INTO security_locks(id)
+ SELECT 'ADMIN_BOOTSTRAP' WHERE NOT EXISTS (SELECT 1 FROM security_locks WHERE id='ADMIN_BOOTSTRAP');

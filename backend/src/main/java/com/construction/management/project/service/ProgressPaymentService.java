@@ -35,7 +35,10 @@ import org.springframework.transaction.annotation.Transactional;
 import org.springframework.util.StringUtils;
 
 @Service
+@org.springframework.security.access.prepost.PreAuthorize("@businessPolicy.allow('PROJECT_READ')")
 public class ProgressPaymentService {
+	@org.springframework.beans.factory.annotation.Autowired private com.construction.management.auth.BusinessPolicy businessPolicy;
+
 	private final ProjectRepository projectRepository;
 	private final ProjectRevisionRepository revisionRepository;
 	private final PurchaseOrderRepository purchaseOrderRepository;
@@ -63,14 +66,18 @@ public class ProgressPaymentService {
 	}
 
 	@Transactional
+	@org.springframework.security.access.prepost.PreAuthorize("@businessPolicy.allow('PROGRESS_READ')")
 	public ProgressPaymentResponse getStatus(String projectId) {
 		Project project = projectRepository.findById(projectId).orElseThrow(() -> new EntityNotFoundException("프로젝트를 찾을 수 없습니다: " + projectId));
-		ensurePendingClaimApprovals(project);
+
 		return toResponse(project);
 	}
 
 	@Transactional
+	@org.springframework.security.access.prepost.PreAuthorize("@businessPolicy.allow('PROGRESS_WRITE')")
+	@com.construction.management.auth.BusinessAction
 	public ProgressPaymentResponse createClaim(String projectId, ProgressPaymentRequest.Claim request) {
+        businessPolicy.lockProject(projectId);
 		projectSettlementService.assertNotSettled(projectId);
 		Project project = getProject(projectId);
 		PurchaseOrder po = getPo(projectId, request.poId());
@@ -80,6 +87,7 @@ public class ProgressPaymentService {
 				.map(ProgressClaim::getClaimAmount)
 				.reduce(BigDecimal.ZERO, BigDecimal::add);
 		BigDecimal newAmount = defaultZero(request.claimAmount());
+		if (newAmount.signum() <= 0 || request.degree() == null || request.degree() < 1) throw new IllegalArgumentException("기성 금액과 차수는 0보다 커야 합니다.");
 		if (approvedClaimTotal.add(newAmount).compareTo(currentPoAmount) > 0) {
 			throw new IllegalArgumentException("기성 신청 금액이 현재 발주금액을 초과합니다.");
 		}
@@ -89,7 +97,10 @@ public class ProgressPaymentService {
 	}
 
 	@Transactional
+	@org.springframework.security.access.prepost.PreAuthorize("@businessPolicy.allow('PAYMENT_EXECUTE')")
+	@com.construction.management.auth.BusinessAction
 	public ProgressPaymentResponse createPayment(String projectId, String claimId, ProgressPaymentRequest.Payment request) {
+        businessPolicy.lockProject(projectId);
 		projectSettlementService.assertNotSettled(projectId);
 		Project project = getProject(projectId);
 		ProgressClaim claim = progressClaimRepository.findById(claimId).orElseThrow(() -> new EntityNotFoundException("기성을 찾을 수 없습니다: " + claimId));
@@ -101,6 +112,7 @@ public class ProgressPaymentService {
 				.map(ActualPayment::getPaidAmount)
 				.reduce(BigDecimal.ZERO, BigDecimal::add);
 		BigDecimal paidAmount = defaultZero(request.paidAmount());
+		if (paidAmount.signum() <= 0 || request.paidDate() == null) throw new IllegalArgumentException("지급 금액과 지급일을 확인하세요.");
 		if (existingPaid.add(paidAmount).compareTo(claim.getClaimAmount()) > 0) {
 			throw new IllegalArgumentException("실제 지급 금액이 승인 기성금액을 초과합니다.");
 		}
@@ -109,7 +121,10 @@ public class ProgressPaymentService {
 	}
 
 	@Transactional
+	@org.springframework.security.access.prepost.PreAuthorize("@businessPolicy.allow('PROGRESS_WRITE')")
+	@com.construction.management.auth.BusinessAction
 	public ProgressPaymentResponse deleteUnapprovedClaim(String projectId, String claimId) {
+		businessPolicy.ownEntity(com.construction.management.project.domain.ProgressClaim.class, claimId);
 		projectSettlementService.assertNotSettled(projectId);
 		Project project = getProject(projectId);
 		ProgressClaim claim = progressClaimRepository.findById(claimId)
@@ -163,7 +178,7 @@ public class ProgressPaymentService {
 				List<ActualPayment> payments = paymentsByClaim.getOrDefault(claim.getClaimId(), List.of());
 				BigDecimal claimPaid = payments.stream().map(ActualPayment::getPaidAmount).reduce(BigDecimal.ZERO, BigDecimal::add);
 				String paymentState = claim.getApprovalStatus() == ApprovalStatus.REQUESTED ? "REQUESTED" : claimPaid.compareTo(claim.getClaimAmount()) >= 0 ? "PAID" : ApprovalStatus.REQUESTED.name().equals(paymentRequestStatus) ? "PAYMENT_APPROVAL_REQUESTED" : "WAITING_FOR_PAYMENT";
-				return new ClaimStatus(claim.getClaimId(), claim.getDegree(), claim.getClaimAmount(), claim.getApprovalStatus().name(), paymentState, claimPaid, claim.getClaimAmount().subtract(claimPaid), payments.stream().map(payment -> new PaymentStatus(payment.getPaymentId(), payment.getPaidAmount(), payment.getPaidDate(), payment.getPaymentStatus(), payment.getAccountInfo(), payment.getReceiptLink())).toList());
+				return new ClaimStatus(claim.getClaimId(), claim.getDegree(), claim.getClaimAmount(), claim.getApprovalStatus().name(), paymentState, claimPaid, claim.getClaimAmount().subtract(claimPaid), payments.stream().map(payment -> new PaymentStatus(payment.getPaymentId(), payment.getPaidAmount(), payment.getPaidDate(), payment.getPaymentStatus(), payment.getAccountInfo(), payment.getReceiptLink(), payment.getCreatedUserId(), payment.getCreatedUserId()==null ? "기존 기록" : payment.getCreatedUserName())).toList(), claim.getCreatedUserId());
 			}).toList());
 		}).toList();
 		long pendingPaymentApprovalCount = purchaseOrderStatuses.stream().filter(po -> ApprovalStatus.REQUESTED.name().equals(po.paymentRequestStatus())).count();

@@ -1,3 +1,5 @@
+import { useAuth } from '../auth/auth'
+import { PermissionGate } from '../auth/Permissions'
 import { useEffect, useMemo, useState } from 'react'
 import { CheckCircle2, PlusCircle, Save } from 'lucide-react'
 import { formatDateTime, formatWorkflowStatus, formatWon, toNumber } from '../../lib/format'
@@ -7,6 +9,7 @@ import { revisionApi } from './revision-api'
 const emptyContractItem: ProjectRevisionContractItem = { work_category: '', quoted_amount: 0, contract_amount: 0, vat_amount: 0, note: '' }
 
 export function RevisionManagementPanel({ projectId, projectCode, projectName }: { projectId: string; projectCode?: string; projectName?: string }) {
+  const { can, user } = useAuth()
   const [revisions, setRevisions] = useState<ProjectRevision[]>([])
   const [active, setActive] = useState<ProjectRevision | null>(null)
   const [history, setHistory] = useState<ProjectRevisionHistory | null>(null)
@@ -47,9 +50,11 @@ export function RevisionManagementPanel({ projectId, projectCode, projectName }:
 
   const contractTotal = useMemo(() => contractItems.reduce((sum, item) => sum + item.contract_amount, 0), [contractItems])
   const nextRevision = Math.max(1, ...revisions.map((item) => item.revision_number)) + 1
-  const isContractEditable = active?.status === 'DRAFT' || active?.status === 'CONTRACT_WRITTEN'
+  const ownsActive = user?.position !== 'STAFF' || active?.created_user_id === user.id
+  const isContractEditable = can('CHANGE_WRITE') && ownsActive && (active?.status === 'DRAFT' || active?.status === 'CONTRACT_WRITTEN')
 
   async function createRevision() {
+    if (!can('CHANGE_WRITE')) return
     if (!title.trim() || !reason.trim()) { setMessage('차수 제목과 변경 사유를 입력해 주세요.'); return }
     setIsSaving(true)
     try {
@@ -67,6 +72,7 @@ export function RevisionManagementPanel({ projectId, projectCode, projectName }:
   }
 
   async function saveContract() {
+    if (!isContractEditable) return
     if (!active) return
     setIsSaving(true)
     try {
@@ -84,6 +90,7 @@ export function RevisionManagementPanel({ projectId, projectCode, projectName }:
   }
 
   async function requestApproval() {
+    if (!can('CHANGE_REQUEST') || !ownsActive) return
     if (!active) return
     setIsSaving(true)
     try {
@@ -108,7 +115,7 @@ export function RevisionManagementPanel({ projectId, projectCode, projectName }:
       {!active && <div className="mt-4 grid gap-3 md:grid-cols-[1fr_1fr_auto]">
         <label className="text-sm font-semibold text-slate-700">{nextRevision}차 제목<input className="input mt-2" value={title} onChange={(event) => setTitle(event.target.value)} placeholder={`${nextRevision}차 계약 변경`} /></label>
         <label className="text-sm font-semibold text-slate-700">변경 사유<input className="input mt-2" value={reason} onChange={(event) => setReason(event.target.value)} placeholder="변경 사유" /></label>
-        <button type="button" disabled={isSaving} onClick={() => void createRevision()} className="mt-7 inline-flex h-10 items-center justify-center gap-2 rounded-md bg-slate-900 px-4 text-sm font-semibold text-white disabled:bg-slate-300"><PlusCircle className="h-4 w-4" />새 차수 작성</button>
+        <PermissionGate permission="CHANGE_WRITE"><button type="button" disabled={isSaving} onClick={() => void createRevision()} className="mt-7 inline-flex h-10 items-center justify-center gap-2 rounded-md bg-slate-900 px-4 text-sm font-semibold text-white disabled:bg-slate-300"><PlusCircle className="h-4 w-4" />새 차수 작성</button></PermissionGate>
       </div>}
     </section>
 
@@ -118,13 +125,13 @@ export function RevisionManagementPanel({ projectId, projectCode, projectName }:
 
     {active && <>
       <section className="rounded-md border border-slate-200 bg-white p-4">
-        <div className="flex flex-wrap items-end justify-between gap-3 border-b border-slate-200 pb-3"><div><h3 className="font-semibold text-slate-950">{active.revision_number}차 고객견적·계약 관리</h3><p className="mt-1 text-sm text-slate-500">변경된 계약 전체금액을 작성합니다. 세부실행예산은 이 화면에서 작성하지 않습니다.</p></div>{isContractEditable && <button type="button" disabled={isSaving} onClick={() => void saveContract()} className="inline-flex items-center gap-2 rounded-md bg-slate-900 px-4 py-2 text-sm font-semibold text-white disabled:bg-slate-300"><Save className="h-4 w-4" />계약 변경 저장</button>}</div>
+        <div className="flex flex-wrap items-end justify-between gap-3 border-b border-slate-200 pb-3"><div><h3 className="font-semibold text-slate-950">{active.revision_number}차 고객견적·계약 관리</h3><p className="mt-1 text-sm text-slate-500">변경된 계약 전체금액을 작성합니다. 세부실행예산은 이 화면에서 작성하지 않습니다.</p></div>{isContractEditable && <PermissionGate permission="CHANGE_WRITE"><button type="button" disabled={isSaving} onClick={() => void saveContract()} className="inline-flex items-center gap-2 rounded-md bg-slate-900 px-4 py-2 text-sm font-semibold text-white disabled:bg-slate-300"><Save className="h-4 w-4" />계약 변경 저장</button></PermissionGate>}</div>
         <label className="mt-4 block max-w-xs text-sm font-semibold text-slate-700">목표이익률 (%)<input disabled={!isContractEditable} className="input mt-2 disabled:cursor-not-allowed disabled:bg-slate-100" value={targetProfitRate} onChange={(event) => setTargetProfitRate(event.target.value)} inputMode="decimal" /></label>
         <div className="mt-4 overflow-x-auto"><table className="min-w-[900px] text-sm"><thead className="bg-slate-50 text-xs text-slate-500"><tr><th className="px-3 py-2 text-left">공종</th><th className="px-3 py-2 text-right">견적금액</th><th className="px-3 py-2 text-right">계약금액</th><th className="px-3 py-2 text-left">비고</th></tr></thead><tbody>{contractItems.map((item, index) => <tr key={index} className="border-t border-slate-100"><td className="px-3 py-2"><input disabled={!isContractEditable} className="input disabled:cursor-not-allowed disabled:bg-slate-100" value={item.work_category} onChange={(event) => setContractItems((items) => items.map((value, i) => i === index ? { ...value, work_category: event.target.value } : value))} /></td><td className="px-3 py-2"><input disabled={!isContractEditable} className="input text-right disabled:cursor-not-allowed disabled:bg-slate-100" value={item.quoted_amount} inputMode="numeric" onChange={(event) => setContractItems((items) => items.map((value, i) => i === index ? { ...value, quoted_amount: toNumber(event.target.value) } : value))} /></td><td className="px-3 py-2"><input disabled={!isContractEditable} className="input text-right disabled:cursor-not-allowed disabled:bg-slate-100" value={item.contract_amount} inputMode="numeric" onChange={(event) => setContractItems((items) => items.map((value, i) => i === index ? { ...value, contract_amount: toNumber(event.target.value), vat_amount: toNumber(event.target.value) * 0.1 } : value))} /></td><td className="px-3 py-2"><input disabled={!isContractEditable} className="input disabled:cursor-not-allowed disabled:bg-slate-100" value={item.note ?? ''} onChange={(event) => setContractItems((items) => items.map((value, i) => i === index ? { ...value, note: event.target.value } : value))} /></td></tr>)}</tbody></table></div>
         {isContractEditable && <button type="button" onClick={() => setContractItems((items) => [...items, emptyContractItem])} className="mt-3 text-sm font-semibold text-cyan-700">+ 계약 공종 추가</button>}<p className="mt-2 text-right text-sm font-semibold">계약 공급가 합계: {formatWon(contractTotal)}</p>
       </section>
 
-      <section className="rounded-md border border-slate-200 bg-white p-4"><div className="flex flex-wrap items-center justify-between gap-3"><div><h3 className="font-semibold text-slate-950">계약 변경 결재</h3><p className="mt-1 text-sm text-slate-500">계약 변경 저장 후 결재를 요청합니다. 세부실행예산 변경은 세부실행예산 메뉴에서 별도 처리합니다.</p></div>{active.status === 'CONTRACT_WRITTEN' && <button type="button" disabled={isSaving} onClick={() => void requestApproval()} className="inline-flex items-center gap-2 rounded-md bg-cyan-700 px-4 py-2 text-sm font-semibold text-white disabled:bg-slate-300"><CheckCircle2 className="h-4 w-4" />계약 변경 결재 요청</button>}{active.status === 'REQUESTED' && <span className="rounded-md bg-amber-50 px-3 py-2 text-sm font-semibold text-amber-800">결재 대기</span>}{active.status === 'APPROVED' && <span className="rounded-md bg-emerald-50 px-3 py-2 text-sm font-semibold text-emerald-800">승인 완료 · {active.revision_number}차 계약 반영</span>}</div><div className="mt-4"><Comparison label="계약 공급가" base={active.base_contract_total} current={active.contract_total} /></div></section>
+      <section className="rounded-md border border-slate-200 bg-white p-4"><div className="flex flex-wrap items-center justify-between gap-3"><div><h3 className="font-semibold text-slate-950">계약 변경 결재</h3><p className="mt-1 text-sm text-slate-500">계약 변경 저장 후 결재를 요청합니다. 세부실행예산 변경은 세부실행예산 메뉴에서 별도 처리합니다.</p></div>{active.status === 'CONTRACT_WRITTEN' && ownsActive && <PermissionGate permission="CHANGE_REQUEST"><button type="button" disabled={isSaving} onClick={() => void requestApproval()} className="inline-flex items-center gap-2 rounded-md bg-cyan-700 px-4 py-2 text-sm font-semibold text-white disabled:bg-slate-300"><CheckCircle2 className="h-4 w-4" />계약 변경 결재 요청</button></PermissionGate>}{active.status === 'REQUESTED' && <span className="rounded-md bg-amber-50 px-3 py-2 text-sm font-semibold text-amber-800">결재 대기</span>}{active.status === 'APPROVED' && <span className="rounded-md bg-emerald-50 px-3 py-2 text-sm font-semibold text-emerald-800">승인 완료 · {active.revision_number}차 계약 반영</span>}</div><div className="mt-4"><Comparison label="계약 공급가" base={active.base_contract_total} current={active.contract_total} /></div></section>
       <RevisionDetail revision={active} history={history} />
     </>}
   </div>

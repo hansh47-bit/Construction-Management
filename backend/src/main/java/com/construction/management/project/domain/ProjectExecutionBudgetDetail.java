@@ -12,7 +12,7 @@ import java.util.Set;
 
 @Entity
 @Table(name = "project_execution_budget_details")
-public class ProjectExecutionBudgetDetail {
+public class ProjectExecutionBudgetDetail extends com.construction.management.auth.AuthoredEntity {
 
 	private static final Set<String> DIRECT_SETTLEMENT_COST_TYPES = Set.of("현장경비", "인건비");
 

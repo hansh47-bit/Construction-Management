@@ -98,22 +98,26 @@ public class ProjectController {
 
 	@PostMapping
 	@ResponseStatus(HttpStatus.CREATED)
+	@org.springframework.security.access.prepost.PreAuthorize("@businessPolicy.allow('PROJECT_CREATE')")
 	public ProjectResponse create(@Valid @RequestBody ProjectCreateRequest request) {
 		return projectService.create(request);
 	}
 
 	@GetMapping
+	@org.springframework.security.access.prepost.PreAuthorize("@businessPolicy.allow('PROJECT_READ')")
 	public List<ProjectResponse> search(@RequestParam(name = "keyword", required = false) String keyword) {
 		return projectService.search(keyword);
 	}
 
 	@DeleteMapping("/{projectId}")
 	@ResponseStatus(HttpStatus.NO_CONTENT)
+	@org.springframework.security.access.prepost.PreAuthorize("@businessPolicy.allow('PROJECT_DELETE')")
 	public void delete(@PathVariable("projectId") String projectId) {
 		projectService.delete(projectId);
 	}
 
 	@GetMapping("/{projectId}/daily-logs")
+	@org.springframework.security.access.prepost.PreAuthorize("@businessPolicy.allow('SITE_READ')")
 	public List<DailyLogResponse> getDailyLogs(
 			@PathVariable("projectId") String projectId,
 			@RequestParam(name = "from", required = false) LocalDate from,
@@ -123,22 +127,26 @@ public class ProjectController {
 	}
 
 	@GetMapping("/{projectId}/daily-logs/{dailyLogId}")
+	@org.springframework.security.access.prepost.PreAuthorize("@businessPolicy.allow('SITE_READ')")
 	public DailyLogResponse getDailyLog(@PathVariable("projectId") String projectId, @PathVariable("dailyLogId") String dailyLogId) {
 		return dailyLogService.get(projectId, dailyLogId);
 	}
 
 	@PostMapping("/{projectId}/daily-logs")
 	@ResponseStatus(HttpStatus.CREATED)
+	@org.springframework.security.access.prepost.PreAuthorize("@businessPolicy.allow('SITE_WRITE')")
 	public DailyLogResponse createDailyLog(@PathVariable("projectId") String projectId, @Valid @RequestBody DailyLogRequest request) {
 		return dailyLogService.create(projectId, request);
 	}
 
 	@PutMapping("/{projectId}/daily-logs/{dailyLogId}")
+	@org.springframework.security.access.prepost.PreAuthorize("@businessPolicy.allow('SITE_WRITE')")
 	public DailyLogResponse updateDailyLog(@PathVariable("projectId") String projectId, @PathVariable("dailyLogId") String dailyLogId, @Valid @RequestBody DailyLogRequest request) {
 		return dailyLogService.update(projectId, dailyLogId, request);
 	}
 
 	@PostMapping(path = "/{projectId}/daily-logs/{dailyLogId}/photos", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
+	@org.springframework.security.access.prepost.PreAuthorize("@businessPolicy.allow('SITE_WRITE')")
 	public DailyLogResponse uploadDailyLogPhoto(
 			@PathVariable("projectId") String projectId, @PathVariable("dailyLogId") String dailyLogId,
 			@RequestParam("file") MultipartFile file, @RequestParam(name = "phase", defaultValue = "DURING") String phase,
@@ -146,68 +154,84 @@ public class ProjectController {
 	) { return dailyLogService.uploadPhoto(projectId, dailyLogId, phase, caption, file, uploadedBy); }
 
 	@GetMapping("/{projectId}/daily-logs/{dailyLogId}/photos/{photoId}")
+	@org.springframework.security.access.prepost.PreAuthorize("@businessPolicy.allow('SITE_READ')")
 	public ResponseEntity<Resource> downloadDailyLogPhoto(@PathVariable("projectId") String projectId, @PathVariable("dailyLogId") String dailyLogId, @PathVariable("photoId") String photoId) {
 		Resource resource = dailyLogService.loadPhoto(projectId, dailyLogId, photoId);
 		return ResponseEntity.ok().cacheControl(CacheControl.noStore().mustRevalidate()).contentType(org.springframework.http.MediaTypeFactory.getMediaType(resource.getFilename()).orElse(MediaType.APPLICATION_OCTET_STREAM)).body(resource);
 	}
 
 	@DeleteMapping("/{projectId}/daily-logs/{dailyLogId}/photos/{photoId}")
+	@org.springframework.security.access.prepost.PreAuthorize("@businessPolicy.allow('SITE_WRITE')")
 	public DailyLogResponse deleteDailyLogPhoto(@PathVariable("projectId") String projectId, @PathVariable("dailyLogId") String dailyLogId, @PathVariable("photoId") String photoId) { return dailyLogService.deletePhoto(projectId, dailyLogId, photoId); }
 
 	@DeleteMapping("/{projectId}/daily-logs/{dailyLogId}")
 	@ResponseStatus(HttpStatus.NO_CONTENT)
+	@org.springframework.security.access.prepost.PreAuthorize("@businessPolicy.allow('SITE_WRITE')")
 	public void deleteDailyLog(@PathVariable("projectId") String projectId, @PathVariable("dailyLogId") String dailyLogId) { dailyLogService.delete(projectId, dailyLogId); }
 
 	@GetMapping("/{projectId}/meeting-minutes")
+	@org.springframework.security.access.prepost.PreAuthorize("@businessPolicy.allow('SITE_READ')")
 	public List<MeetingMinutesResponse> getMeetingMinutes(@PathVariable("projectId") String projectId) { return meetingMinutesService.list(projectId); }
 
 	@GetMapping("/{projectId}/meeting-minutes/{meetingId}")
+	@org.springframework.security.access.prepost.PreAuthorize("@businessPolicy.allow('SITE_READ')")
 	public MeetingMinutesResponse getMeetingMinutes(@PathVariable("projectId") String projectId, @PathVariable("meetingId") String meetingId) { return meetingMinutesService.get(projectId, meetingId); }
 
 	@PostMapping("/{projectId}/meeting-minutes")
 	@ResponseStatus(HttpStatus.CREATED)
+	@org.springframework.security.access.prepost.PreAuthorize("@businessPolicy.allow('SITE_WRITE')")
 	public MeetingMinutesResponse createMeetingMinutes(@PathVariable("projectId") String projectId, @Valid @RequestBody MeetingMinutesRequest request) { return meetingMinutesService.create(projectId, request); }
 
 	@PutMapping("/{projectId}/meeting-minutes/{meetingId}")
+	@org.springframework.security.access.prepost.PreAuthorize("@businessPolicy.allow('SITE_WRITE')")
 	public MeetingMinutesResponse updateMeetingMinutes(@PathVariable("projectId") String projectId, @PathVariable("meetingId") String meetingId, @Valid @RequestBody MeetingMinutesRequest request) { return meetingMinutesService.update(projectId, meetingId, request); }
 
 	@PostMapping(path = "/{projectId}/meeting-minutes/{meetingId}/attachments", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
+	@org.springframework.security.access.prepost.PreAuthorize("@businessPolicy.allow('SITE_WRITE')")
 	public MeetingMinutesResponse uploadMeetingAttachment(@PathVariable("projectId") String projectId, @PathVariable("meetingId") String meetingId, @RequestParam("file") MultipartFile file, @RequestParam(name = "uploadedBy", required = false) String uploadedBy) { return meetingMinutesService.uploadAttachment(projectId, meetingId, file, uploadedBy); }
 
 	@GetMapping("/{projectId}/meeting-minutes/{meetingId}/attachments/{attachmentId}")
+	@org.springframework.security.access.prepost.PreAuthorize("@businessPolicy.allow('SITE_READ')")
 	public ResponseEntity<Resource> downloadMeetingAttachment(@PathVariable("projectId") String projectId, @PathVariable("meetingId") String meetingId, @PathVariable("attachmentId") String attachmentId) {
 		Resource resource = meetingMinutesService.loadAttachment(projectId, meetingId, attachmentId);
 		return ResponseEntity.ok().header(HttpHeaders.CONTENT_DISPOSITION, ContentDisposition.attachment().filename(resource.getFilename() == null ? "attachment" : resource.getFilename(), StandardCharsets.UTF_8).build().toString()).cacheControl(CacheControl.noStore().mustRevalidate()).contentType(org.springframework.http.MediaTypeFactory.getMediaType(resource.getFilename()).orElse(MediaType.APPLICATION_OCTET_STREAM)).body(resource);
 	}
 
 	@DeleteMapping("/{projectId}/meeting-minutes/{meetingId}/attachments/{attachmentId}")
+	@org.springframework.security.access.prepost.PreAuthorize("@businessPolicy.allow('SITE_WRITE')")
 	public MeetingMinutesResponse deleteMeetingAttachment(@PathVariable("projectId") String projectId, @PathVariable("meetingId") String meetingId, @PathVariable("attachmentId") String attachmentId) { return meetingMinutesService.deleteAttachment(projectId, meetingId, attachmentId); }
 
 	@DeleteMapping("/{projectId}/meeting-minutes/{meetingId}")
 	@ResponseStatus(HttpStatus.NO_CONTENT)
+	@org.springframework.security.access.prepost.PreAuthorize("@businessPolicy.allow('SITE_WRITE')")
 	public void deleteMeetingMinutes(@PathVariable("projectId") String projectId, @PathVariable("meetingId") String meetingId) { meetingMinutesService.delete(projectId, meetingId); }
 
 	@PostMapping("/{projectId}/start-construction")
+	@org.springframework.security.access.prepost.PreAuthorize("@businessPolicy.allow('PROJECT_STATUS')")
 	public ProjectResponse startConstruction(@PathVariable("projectId") String projectId) {
 		return projectService.startConstruction(projectId);
 	}
 
 	@PostMapping("/{projectId}/synchronize-preparation-status")
+	@org.springframework.security.access.prepost.PreAuthorize("@businessPolicy.allow('PROJECT_STATUS')")
 	public ProjectResponse synchronizePreparationStatus(@PathVariable("projectId") String projectId) {
 		return projectService.synchronizePreparationStatus(projectId);
 	}
 
 	@GetMapping("/{projectId}/integrated-summary")
+	@org.springframework.security.access.prepost.PreAuthorize("@businessPolicy.allow('PROJECT_READ')")
 	public IntegratedSummaryResponse getIntegratedSummary(@PathVariable("projectId") String projectId) {
 		return projectService.getIntegratedSummary(projectId);
 	}
 
 	@GetMapping("/{projectId}/contracts")
+	@org.springframework.security.access.prepost.PreAuthorize("@businessPolicy.allow('CONTRACT_READ')")
 	public CustomerContractResponse getCustomerContract(@PathVariable("projectId") String projectId) {
 		return customerContractService.getContract(projectId);
 	}
 
 	@PutMapping("/{projectId}/contracts")
+	@org.springframework.security.access.prepost.PreAuthorize("@businessPolicy.allow('CONTRACT_WRITE')")
 	public CustomerContractResponse saveCustomerContract(
 			@PathVariable("projectId") String projectId,
 			@Valid @RequestBody CustomerContractRequest request
@@ -217,6 +241,7 @@ public class ProjectController {
 
 	@PostMapping("/{projectId}/revisions")
 	@ResponseStatus(HttpStatus.CREATED)
+	@org.springframework.security.access.prepost.PreAuthorize("@businessPolicy.allow('CHANGE_WRITE')")
 	public ProjectRevisionResponse createRevision(
 			@PathVariable("projectId") String projectId,
 			@Valid @RequestBody ProjectRevisionCreateRequest request
@@ -225,11 +250,13 @@ public class ProjectController {
 	}
 
 	@GetMapping("/{projectId}/revisions")
+	@org.springframework.security.access.prepost.PreAuthorize("@businessPolicy.allow('CHANGE_READ')")
 	public List<ProjectRevisionResponse> getRevisions(@PathVariable("projectId") String projectId) {
 		return projectRevisionService.list(projectId);
 	}
 
 	@GetMapping("/{projectId}/revisions/{revisionId}")
+	@org.springframework.security.access.prepost.PreAuthorize("@businessPolicy.allow('CHANGE_READ')")
 	public ProjectRevisionResponse getRevision(
 			@PathVariable("projectId") String projectId,
 			@PathVariable("revisionId") String revisionId
@@ -238,6 +265,7 @@ public class ProjectController {
 	}
 
 	@GetMapping("/{projectId}/revisions/{revisionId}/history")
+	@org.springframework.security.access.prepost.PreAuthorize("@businessPolicy.allow('CHANGE_READ')")
 	public ProjectRevisionHistoryResponse getRevisionHistory(
 			@PathVariable("projectId") String projectId,
 			@PathVariable("revisionId") String revisionId
@@ -246,6 +274,7 @@ public class ProjectController {
 	}
 
 	@PutMapping("/{projectId}/revisions/{revisionId}/contract")
+	@org.springframework.security.access.prepost.PreAuthorize("@businessPolicy.allow('CHANGE_WRITE')")
 	public ProjectRevisionResponse saveRevisionContract(
 			@PathVariable("projectId") String projectId,
 			@PathVariable("revisionId") String revisionId,
@@ -255,6 +284,7 @@ public class ProjectController {
 	}
 
 	@PutMapping("/{projectId}/revisions/{revisionId}/execution-budget")
+	@org.springframework.security.access.prepost.PreAuthorize("@businessPolicy.allow('CHANGE_WRITE')")
 	public ProjectRevisionResponse saveRevisionExecutionBudget(
 			@PathVariable("projectId") String projectId,
 			@PathVariable("revisionId") String revisionId,
@@ -264,6 +294,7 @@ public class ProjectController {
 	}
 
 	@PostMapping("/{projectId}/revisions/{revisionId}/request-approval")
+	@org.springframework.security.access.prepost.PreAuthorize("@businessPolicy.allow('CHANGE_REQUEST')")
 	public ApprovalResponse requestRevisionApproval(
 			@PathVariable("projectId") String projectId,
 			@PathVariable("revisionId") String revisionId,
@@ -273,12 +304,18 @@ public class ProjectController {
 	}
 
 	@GetMapping("/{projectId}/revisions/procurement-items")
+	@org.springframework.security.access.prepost.PreAuthorize("@businessPolicy.allow('PROJECT_READ')")
 	public ProjectRevisionProcurementResponse getRevisionProcurementItems(@PathVariable("projectId") String projectId) {
 		return projectRevisionService.procurementItemIds(projectId);
 	}
 
+ @PostMapping("/{projectId}/change-orders/executive-correction")
+ @org.springframework.security.access.prepost.PreAuthorize("@businessPolicy.allow('EXECUTIVE_CORRECT')")
+ public ChangeOrderResponse correctByExecutive(@PathVariable("projectId") String projectId,@Valid @RequestBody ExecutiveCorrectionRequest request) { return changeManagementService.correctByExecutive(projectId,request); }
+
 	@PostMapping("/{projectId}/change-orders")
 	@ResponseStatus(HttpStatus.CREATED)
+	@org.springframework.security.access.prepost.PreAuthorize("@businessPolicy.allow('CHANGE_WRITE')")
 	public ChangeOrderResponse createChangeOrder(
 			@PathVariable("projectId") String projectId,
 			@Valid @RequestBody ChangeOrderCreateRequest request
@@ -287,6 +324,7 @@ public class ProjectController {
 	}
 
 	@PostMapping("/{projectId}/change-orders/{changeOrderId}/contract-changes")
+	@org.springframework.security.access.prepost.PreAuthorize("@businessPolicy.allow('CHANGE_WRITE')")
 	public ChangeOrderResponse saveContractChange(
 			@PathVariable("projectId") String projectId,
 			@PathVariable("changeOrderId") String changeOrderId,
@@ -296,6 +334,7 @@ public class ProjectController {
 	}
 
 	@PostMapping("/{projectId}/change-orders/{changeOrderId}/budget-proposals")
+	@org.springframework.security.access.prepost.PreAuthorize("@businessPolicy.allow('CHANGE_WRITE')")
 	public ChangeOrderResponse saveBudgetProposal(
 			@PathVariable("projectId") String projectId,
 			@PathVariable("changeOrderId") String changeOrderId,
@@ -305,6 +344,7 @@ public class ProjectController {
 	}
 
 	@PostMapping("/{projectId}/change-orders/{changeOrderId}/budget-changes/request-approval")
+	@org.springframework.security.access.prepost.PreAuthorize("@businessPolicy.allow('CHANGE_REQUEST')")
 	public ChangeOrderResponse requestChangeApproval(
 			@PathVariable("projectId") String projectId,
 			@PathVariable("changeOrderId") String changeOrderId
@@ -313,6 +353,7 @@ public class ProjectController {
 	}
 
 	@GetMapping("/{projectId}/change-orders/{changeOrderId}/impact-summary")
+	@org.springframework.security.access.prepost.PreAuthorize("@businessPolicy.allow('CHANGE_READ')")
 	public ChangeOrderResponse getChangeImpactSummary(
 			@PathVariable("projectId") String projectId,
 			@PathVariable("changeOrderId") String changeOrderId
@@ -321,6 +362,7 @@ public class ProjectController {
 	}
 
 	@GetMapping("/{projectId}/change-orders/{changeOrderId}/reconciliation")
+	@org.springframework.security.access.prepost.PreAuthorize("@businessPolicy.allow('CHANGE_READ')")
 	public ChangeOrderResponse getChangeReconciliation(
 			@PathVariable("projectId") String projectId,
 			@PathVariable("changeOrderId") String changeOrderId
@@ -329,11 +371,13 @@ public class ProjectController {
 	}
 
 	@GetMapping("/{projectId}/change-orders")
+	@org.springframework.security.access.prepost.PreAuthorize("@businessPolicy.allow('CHANGE_READ')")
 	public List<ChangeOrderResponse> getChangeOrders(@PathVariable("projectId") String projectId) {
 		return changeManagementService.getHistory(projectId);
 	}
 
 	@PostMapping(path = "/{projectId}/contract-files", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
+	@org.springframework.security.access.prepost.PreAuthorize("@businessPolicy.allow('CONTRACT_WRITE')")
 	public CustomerContractResponse uploadContractFile(
 			@PathVariable("projectId") String projectId,
 			@RequestParam(name = "fileType", defaultValue = "CONTRACT") String fileType,
@@ -343,6 +387,7 @@ public class ProjectController {
 	}
 
 	@DeleteMapping("/{projectId}/contract-files/{fileId}")
+	@org.springframework.security.access.prepost.PreAuthorize("@businessPolicy.allow('CONTRACT_WRITE')")
 	public CustomerContractResponse deleteContractFile(
 			@PathVariable("projectId") String projectId,
 			@PathVariable("fileId") String fileId
@@ -351,6 +396,7 @@ public class ProjectController {
 	}
 
 	@GetMapping("/{projectId}/contract-files/{fileId}")
+	@org.springframework.security.access.prepost.PreAuthorize("@businessPolicy.allow('CONTRACT_READ')")
 	public ResponseEntity<Resource> downloadContractFile(
 			@PathVariable("projectId") String projectId,
 			@PathVariable("fileId") String fileId
@@ -373,11 +419,13 @@ public class ProjectController {
 	}
 
 	@GetMapping("/{projectId}/execution-budget-details")
+	@org.springframework.security.access.prepost.PreAuthorize("@businessPolicy.allow('BUDGET_READ')")
 	public ExecutionBudgetDetailResponse getExecutionBudgetDetails(@PathVariable("projectId") String projectId) {
 		return executionBudgetDetailService.getDetails(projectId);
 	}
 
 	@GetMapping("/{projectId}/approvals/{approvalId}/execution-budget-attachments/{attachmentId}")
+	@org.springframework.security.access.prepost.PreAuthorize("@businessPolicy.allow('APPROVAL_READ')")
 	public ResponseEntity<Resource> downloadExecutionBudgetApprovalAttachment(
 			@PathVariable("projectId") String projectId,
 			@PathVariable("approvalId") String approvalId,
@@ -406,6 +454,7 @@ public class ProjectController {
 	}
 
 	@PutMapping("/{projectId}/execution-budget-details")
+	@org.springframework.security.access.prepost.PreAuthorize("@businessPolicy.allow('BUDGET_WRITE')")
 	public ExecutionBudgetDetailResponse saveExecutionBudgetDetails(
 			@PathVariable("projectId") String projectId,
 			@Valid @RequestBody ExecutionBudgetDetailRequest request
@@ -414,6 +463,7 @@ public class ProjectController {
 	}
 
 	@PostMapping(path = "/{projectId}/execution-budget-details/request-approval", consumes = MediaType.APPLICATION_JSON_VALUE)
+	@org.springframework.security.access.prepost.PreAuthorize("@businessPolicy.allow('BUDGET_REQUEST')")
 	public ApprovalResponse requestExecutionBudgetApproval(
 			@PathVariable("projectId") String projectId,
 			@RequestBody(required = false) ApprovalRequest request
@@ -422,6 +472,7 @@ public class ProjectController {
 	}
 
 	@PostMapping(path = "/{projectId}/execution-budget-details/request-approval", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
+	@org.springframework.security.access.prepost.PreAuthorize("@businessPolicy.allow('BUDGET_REQUEST')")
 	public ApprovalResponse requestExecutionBudgetApprovalWithAttachments(
 			@PathVariable("projectId") String projectId,
 			@RequestPart(name = "request", required = false) ApprovalRequest request,
@@ -431,6 +482,7 @@ public class ProjectController {
 	}
 
 	@GetMapping("/{projectId}/execution-items/{itemId}/comparisons")
+	@org.springframework.security.access.prepost.PreAuthorize("@businessPolicy.allow('PROCUREMENT_READ')")
 	public VendorComparisonResponse getVendorComparisons(
 			@PathVariable("projectId") String projectId,
 			@PathVariable("itemId") String itemId
@@ -439,6 +491,7 @@ public class ProjectController {
 	}
 
 	@PostMapping("/{projectId}/execution-items/{itemId}/comparisons")
+	@org.springframework.security.access.prepost.PreAuthorize("@businessPolicy.allow('PROCUREMENT_WRITE')")
 	public VendorComparisonResponse saveVendorComparisons(
 			@PathVariable("projectId") String projectId,
 			@PathVariable("itemId") String itemId,
@@ -448,6 +501,7 @@ public class ProjectController {
 	}
 
 	@PostMapping(path = "/{projectId}/execution-items/{itemId}/comparisons/{comparisonId}/attachments", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
+	@org.springframework.security.access.prepost.PreAuthorize("@businessPolicy.allow('PROCUREMENT_WRITE')")
 	public ApprovalResponse.Attachment uploadVendorComparisonAttachment(
 			@PathVariable("projectId") String projectId,
 			@PathVariable("itemId") String itemId,
@@ -458,6 +512,7 @@ public class ProjectController {
 	}
 
 	@GetMapping("/{projectId}/execution-items/{itemId}/comparison-attachments/{attachmentId}")
+	@org.springframework.security.access.prepost.PreAuthorize("@businessPolicy.allow('PROCUREMENT_READ')")
 	public ResponseEntity<Resource> downloadVendorComparisonAttachment(
 			@PathVariable("projectId") String projectId,
 			@PathVariable("itemId") String itemId,
@@ -484,6 +539,7 @@ public class ProjectController {
 	}
 
 	@GetMapping("/{projectId}/purchase-orders/draft/{itemId}")
+	@org.springframework.security.access.prepost.PreAuthorize("@businessPolicy.allow('PROCUREMENT_READ')")
 	public PurchaseOrderDraftResponse getPurchaseOrderDraft(
 			@PathVariable("projectId") String projectId,
 			@PathVariable("itemId") String itemId
@@ -492,6 +548,7 @@ public class ProjectController {
 	}
 
 	@PostMapping("/{projectId}/purchase-orders/draft/{itemId}/request")
+	@org.springframework.security.access.prepost.PreAuthorize("@businessPolicy.allow('PROCUREMENT_REQUEST')")
 	public PurchaseOrderDraftResponse requestPurchaseOrder(
 			@PathVariable("projectId") String projectId,
 			@PathVariable("itemId") String itemId
@@ -500,27 +557,32 @@ public class ProjectController {
 	}
 
 	@GetMapping("/{projectId}/progress-payments")
+	@org.springframework.security.access.prepost.PreAuthorize("@businessPolicy.allow('PROGRESS_READ')")
 	public ProgressPaymentResponse getProgressPayments(@PathVariable("projectId") String projectId) {
 		return progressPaymentService.getStatus(projectId);
 	}
 
 	@GetMapping("/{projectId}/purchase-orders")
+	@org.springframework.security.access.prepost.PreAuthorize("@businessPolicy.allow('PROCUREMENT_READ')")
 	public PurchaseOrderResponse getPurchaseOrders(@PathVariable("projectId") String projectId) {
 		return purchaseOrderService.getPurchaseOrders(projectId);
 	}
 
 	@PostMapping("/{projectId}/payment-requests")
 	@ResponseStatus(HttpStatus.CREATED)
+	@org.springframework.security.access.prepost.PreAuthorize("@businessPolicy.allow('PAYMENT_REQUEST')")
 	public void requestPayments(@PathVariable("projectId") String projectId, @RequestBody PaymentRequestCreateRequest request) {
 		paymentRequestService.requestPayments(projectId, request);
 	}
 
 	@GetMapping("/{projectId}/settlement")
+	@org.springframework.security.access.prepost.PreAuthorize("@businessPolicy.allow('SETTLEMENT_READ')")
 	public ProjectSettlementResponse getSettlement(@PathVariable("projectId") String projectId) {
 		return projectSettlementService.getSettlement(projectId);
 	}
 
 	@PostMapping({"/{projectId}/settlement/request-approval", "/{projectId}/settlement/complete"})
+	@org.springframework.security.access.prepost.PreAuthorize("@businessPolicy.allow('SETTLEMENT_REQUEST')")
 	public ProjectSettlementResponse requestSettlementApproval(
 			@PathVariable("projectId") String projectId,
 			@RequestBody ProjectSettlementCompleteRequest request
@@ -529,6 +591,7 @@ public class ProjectController {
 	}
 
 	@PostMapping("/{projectId}/progress-claims")
+	@org.springframework.security.access.prepost.PreAuthorize("@businessPolicy.allow('PROGRESS_WRITE')")
 	public ProgressPaymentResponse createProgressClaim(
 			@PathVariable("projectId") String projectId,
 			@RequestBody ProgressPaymentRequest.Claim request
@@ -537,6 +600,7 @@ public class ProjectController {
 	}
 
 	@DeleteMapping("/{projectId}/progress-claims/{claimId}")
+	@org.springframework.security.access.prepost.PreAuthorize("@businessPolicy.allow('PROGRESS_WRITE')")
 	public ProgressPaymentResponse deleteUnapprovedProgressClaim(
 			@PathVariable("projectId") String projectId,
 			@PathVariable("claimId") String claimId
@@ -545,6 +609,7 @@ public class ProjectController {
 	}
 
 	@PostMapping("/{projectId}/progress-claims/{claimId}/payments")
+	@org.springframework.security.access.prepost.PreAuthorize("@businessPolicy.allow('PAYMENT_EXECUTE')")
 	public ProgressPaymentResponse createPayment(
 			@PathVariable("projectId") String projectId,
 			@PathVariable("claimId") String claimId,

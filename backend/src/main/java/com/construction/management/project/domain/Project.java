@@ -14,7 +14,7 @@ import java.time.LocalDateTime;
 
 @Entity
 @Table(name = "projects")
-public class Project {
+public class Project extends com.construction.management.auth.AuthoredEntity {
 
 	@Id
 	@Column(name = "project_id", nullable = false, length = 64)

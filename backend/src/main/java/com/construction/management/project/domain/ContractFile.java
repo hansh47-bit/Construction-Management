@@ -9,7 +9,7 @@ import java.time.LocalDateTime;
 
 @Entity
 @Table(name = "contract_files")
-public class ContractFile {
+public class ContractFile extends com.construction.management.auth.AuthoredEntity {
 
 	@Id
 	@Column(name = "file_id", nullable = false, length = 64)

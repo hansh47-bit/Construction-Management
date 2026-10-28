@@ -1,3 +1,4 @@
+import { PermissionGate } from '../auth/Permissions'
 import { Paperclip, Plus, Save, Trash2 } from 'lucide-react'
 import { MetricPanel } from '../../components/ui/Metrics'
 import { MoneyInput } from '../../components/ui/MoneyInput'
@@ -71,9 +72,9 @@ export function VendorComparisonPanel({
             <Save className="h-4 w-4" aria-hidden="true" />
             비교견적 저장
           </button>
-          <button type="button" onClick={requestPurchaseOrder} disabled={!canRequestPurchaseOrder} className="inline-flex items-center gap-2 rounded-md bg-cyan-700 px-4 py-2 text-sm font-semibold text-white hover:bg-cyan-800 disabled:cursor-not-allowed disabled:bg-slate-300">
+          <PermissionGate permission="PROCUREMENT_REQUEST"><button type="button" onClick={requestPurchaseOrder} disabled={!canRequestPurchaseOrder} className="inline-flex items-center gap-2 rounded-md bg-cyan-700 px-4 py-2 text-sm font-semibold text-white hover:bg-cyan-800 disabled:cursor-not-allowed disabled:bg-slate-300">
             발주품의 요청
-          </button>
+          </button></PermissionGate>
         </div>
       </div>
 

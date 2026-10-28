@@ -4,7 +4,7 @@ import jakarta.persistence.*;
 import java.math.BigDecimal;
 
 @Entity @Table(name = "daily_log_material_entries")
-public class DailyLogMaterialEntry {
+public class DailyLogMaterialEntry extends com.construction.management.auth.AuthoredEntity {
 	@Id @GeneratedValue(strategy = GenerationType.IDENTITY) private Long id;
 	@Column(name = "daily_log_id", nullable = false, length = 64) private String dailyLogId;
 	@Column(name = "entry_type", nullable = false, length = 32) private String entryType;
