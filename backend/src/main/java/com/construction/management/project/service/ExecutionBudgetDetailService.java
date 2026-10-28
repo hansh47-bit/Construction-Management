@@ -28,6 +28,7 @@ import java.util.Comparator;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.UUID;
 import java.util.stream.Collectors;
 import org.springframework.stereotype.Service;
@@ -72,12 +73,19 @@ public class ExecutionBudgetDetailService {
 	@Transactional(readOnly = true)
 	public ExecutionBudgetDetailResponse getDetails(String projectId) {
 		Project project = getProject(projectId);
-		return toResponse(project, projectRevisionService.latestApprovedBudget(projectId).orElse(null));
+		return toResponse(project, projectRevisionService.latestOpenBudget(projectId)
+				.or(() -> projectRevisionService.latestApprovedBudget(projectId))
+				.orElse(null));
 	}
 
 	@Transactional
 	public ExecutionBudgetDetailResponse saveDetails(String projectId, ExecutionBudgetDetailRequest request) {
 		projectSettlementService.assertNotSettled(projectId);
+		Optional<ProjectRevisionBudgetView> writableRevision = projectRevisionService.latestWritableBudget(projectId);
+		if (writableRevision.isPresent()) {
+			projectRevisionService.saveBudget(projectId, writableRevision.get().revisionId(), request);
+			return getDetails(projectId);
+		}
 		Project project = getProject(projectId);
 		boolean locked = itemRepository.findByProjectIdOrderByItemIdAsc(projectId).stream()
 				.anyMatch(item -> ApprovalStatus.REQUESTED.name().equals(item.getApprovalStatus()) || ApprovalStatus.APPROVED.name().equals(item.getApprovalStatus()));
@@ -166,10 +174,10 @@ public class ExecutionBudgetDetailService {
 		List<ProjectExecutionBudgetItem> items = itemRepository.findByProjectIdOrderByItemIdAsc(project.getProjectId());
 		Map<String, List<Detail>> detailsByItem = details.stream()
 				.collect(Collectors.groupingBy(Detail::budgetItemId));
-		String approvalStatus = executionBudgetApprovalStatus(items);
-		String approvalId = items.stream().map(ProjectExecutionBudgetItem::getApprovalId).filter(StringUtils::hasText).findFirst().orElse(null);
-		String approvalComment = items.stream().map(ProjectExecutionBudgetItem::getApprovalComment).filter(StringUtils::hasText).findFirst().orElse(null);
-		boolean rewriteAvailable = projectRevisionService.isExecutionBudgetRewriteAvailable(project.getProjectId());
+		String approvalStatus = appliedRevision == null ? executionBudgetApprovalStatus(items) : appliedRevision.status();
+		String approvalId = appliedRevision == null ? items.stream().map(ProjectExecutionBudgetItem::getApprovalId).filter(StringUtils::hasText).findFirst().orElse(null) : null;
+		String approvalComment = appliedRevision == null ? items.stream().map(ProjectExecutionBudgetItem::getApprovalComment).filter(StringUtils::hasText).findFirst().orElse(null) : null;
+		boolean rewriteAvailable = appliedRevision == null && projectRevisionService.isExecutionBudgetRewriteAvailable(project.getProjectId());
 		List<String> itemIds = items.stream().map(ProjectExecutionBudgetItem::getItemId).toList();
 		Map<String, BigDecimal> changesByItem = itemIds.isEmpty() ? Map.of() : budgetChangeRepository.findByBudgetIdInAndApprovalStatus(itemIds, ApprovalStatus.APPROVED).stream()
 				.collect(Collectors.groupingBy(BudgetChange::getBudgetId, Collectors.mapping(change -> defaultZero(change.getChangeAmount()), Collectors.reducing(BigDecimal.ZERO, BigDecimal::add))));
@@ -208,7 +216,9 @@ public class ExecutionBudgetDetailService {
 			approvalId,
 			approvalComment,
 			rewriteAvailable,
+			appliedRevision == null ? null : appliedRevision.revisionId(),
 			appliedRevision == null ? null : appliedRevision.revisionNumber(),
+			appliedRevision == null ? null : appliedRevision.status(),
 			approvedAmount,
 				totalDetailAmount,
 				targetCostLimit.compareTo(BigDecimal.ZERO) > 0 && totalDetailAmount.compareTo(targetCostLimit) > 0,

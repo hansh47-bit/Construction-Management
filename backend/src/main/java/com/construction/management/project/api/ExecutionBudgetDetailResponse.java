@@ -23,8 +23,12 @@ public record ExecutionBudgetDetailResponse(
 		String approvalComment,
 		@JsonProperty("execution_budget_rewrite_available")
 		boolean executionBudgetRewriteAvailable,
+		@JsonProperty("applied_revision_id")
+		String appliedRevisionId,
 		@JsonProperty("applied_revision_number")
 		Integer appliedRevisionNumber,
+		@JsonProperty("applied_revision_status")
+		String appliedRevisionStatus,
 		@JsonProperty("approved_amount")
 		BigDecimal approvedAmount,
 		@JsonProperty("total_detail_amount")

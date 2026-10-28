@@ -52,7 +52,10 @@ export function ExecutionBudgetDetailPanel({
   // 상단 지표와 표 하단 합계는 모두 현재 표시 중인 상세 행의 수량 × 단가 합계를 사용한다.
   // 승인 이력의 집계값은 변경 전 항목을 포함할 수 있어 상세 행 합계와 달라질 수 있다.
   const displayedBudgetAmount = totalAmount
-  const appliedRevisionLabel = executionBudget.applied_revision_number ? `${executionBudget.applied_revision_number}차 승인본` : '최초 승인본'
+  const appliedRevisionLabel = executionBudget.applied_revision_number
+    ? `${executionBudget.applied_revision_number}차 ${executionBudget.applied_revision_status === 'APPROVED' ? '승인본' : '작성중'}`
+    : '최초 승인본'
+  const isRevisionDraft = Boolean(executionBudget.applied_revision_id) && executionBudget.applied_revision_status !== 'APPROVED'
   const costTypesByBudgetItem = new Map<string, string>()
   details.forEach((detail) => {
     const current = costTypesByBudgetItem.get(detail.budget_item_id)?.split(' · ').filter(Boolean) ?? []
@@ -266,7 +269,7 @@ export function ExecutionBudgetDetailPanel({
             </div>
           </div>
         )}
-        <div className="mt-4 flex flex-wrap items-center gap-2">
+        {!isRevisionDraft && <div className="mt-4 flex flex-wrap items-center gap-2">
           <label className="inline-flex cursor-pointer items-center gap-2 rounded-md border border-slate-300 px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50 has-[:disabled]:cursor-not-allowed has-[:disabled]:opacity-50">
             <Upload className="h-4 w-4" aria-hidden="true" />
             결재 첨부파일 선택
@@ -284,7 +287,8 @@ export function ExecutionBudgetDetailPanel({
           {approvalFiles.length > 0 && (
             <span className="text-sm text-slate-600">{approvalFiles.map((file) => file.name).join(', ')}</span>
           )}
-        </div>
+        </div>}
+        {isRevisionDraft && <p className="mt-4 text-xs text-slate-500">새 차수의 세부실행예산은 변경 차수 결재에 함께 반영됩니다.</p>}
         <button
           type="button"
           onClick={requestExecutionBudgetApproval}

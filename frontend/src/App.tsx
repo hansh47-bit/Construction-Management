@@ -45,9 +45,9 @@ function newContractItem(): CustomerContractItem {
 
 function newExecutionBudgetDetail(projectCode = ''): ExecutionBudgetDetail {
   return {
-    budget_item_id: 'EX-001',
-    category_name: '인테리어공사',
-    item_name: '철거/폐기물',
+    budget_item_id: '',
+    category_name: '',
+    item_name: '',
     cost_type: '외주비',
     vendor_description: '',
     unit: '식',
@@ -371,7 +371,7 @@ function App() {
         .map((detail) => ({
           budget_item_id: detail.budget_item_id,
           category_name: detail.category_name,
-          item_name: detail.category_name,
+          item_name: detail.item_name,
           cost_type: detail.cost_type,
           vendor_description: detail.vendor_description ?? '',
           unit: detail.unit ?? '',
@@ -382,20 +382,33 @@ function App() {
         })),
     }
 
-    const response = await executionBudgetApi.save(selectedProjectId, payload)
+    const response = executionBudget?.applied_revision_id && executionBudget.applied_revision_status !== 'APPROVED'
+      ? await revisionApi.saveBudget(selectedProjectId, executionBudget.applied_revision_id, payload)
+      : await executionBudgetApi.save(selectedProjectId, payload)
     if (!response.ok) {
-      setError(`세부실행예산 저장 실패: ${response.status}`)
+      const message = await response.text()
+      setError(message || `세부실행예산 저장 실패: ${response.status}`)
       return
     }
 
-    const data: ExecutionBudgetDetailResponse = await response.json()
-    setExecutionBudget(data)
-    setExecutionDetails(data.details.length > 0 ? data.details : [newExecutionBudgetDetail(data.project_code)])
+    await loadExecutionBudgetDetails(selectedProjectId)
     await loadSettlement(selectedProjectId)
   }
 
   async function requestExecutionBudgetApproval() {
     if (!selectedProjectId) return
+    if (executionBudget?.applied_revision_id) {
+      const response = await revisionApi.requestApproval(selectedProjectId, executionBudget.applied_revision_id)
+      if (!response.ok) {
+        const message = await response.text()
+        setError(message || `변경 차수 결재요청 실패: ${response.status}`)
+        return
+      }
+      setExecutionBudgetApprovalFiles([])
+      await loadExecutionBudgetDetails(selectedProjectId)
+      await loadApprovals()
+      return
+    }
     const formData = new FormData()
     formData.append('request', new Blob([
       JSON.stringify({ request_user: 'system', request_reason: '최초 실행예산 승인 요청' }),
@@ -1038,13 +1051,35 @@ function App() {
 
         {activePage === 'changes' && (
           <section className="rounded-md border border-slate-200 bg-white p-4 shadow-sm">
+            <div className="mb-6 flex flex-col gap-3 border-b border-slate-200 pb-4 sm:flex-row sm:items-end sm:justify-between">
+              <div>
+                <h2 className="text-lg font-semibold text-slate-950">프로젝트별 변경관리 이력</h2>
+                <p className="mt-1 text-sm text-slate-500">조회할 프로젝트를 선택하면 해당 프로젝트의 계약 변경 차수와 관련 이력만 표시합니다.</p>
+              </div>
+              <label className="w-full text-sm font-semibold text-slate-700 sm:w-80">
+                조회 프로젝트
+                <select
+                  aria-label="변경관리 이력 조회 프로젝트"
+                  className="input mt-2 w-full"
+                  value={selectedProjectId ?? ''}
+                  onChange={(event) => setSelectedProjectId(event.target.value || null)}
+                >
+                  <option value="">프로젝트를 선택하세요</option>
+                  {projects.map((project) => (
+                    <option key={project.project_id} value={project.project_id}>
+                      {project.project_code} · {project.project_name}
+                    </option>
+                  ))}
+                </select>
+              </label>
+            </div>
             {selectedProjectId ? (
               <div className="space-y-8">
                 <RevisionManagementPanel projectId={selectedProjectId} projectCode={selectedProject?.project_code} projectName={selectedProject?.project_name} />
               </div>
             ) : (
               <div className="rounded-md border border-dashed border-slate-300 bg-slate-50 p-8 text-center text-sm text-slate-500">
-                프로젝트 현황에서 프로젝트를 선택하면 해당 프로젝트의 변경관리 이력을 조회할 수 있습니다.
+                조회할 프로젝트를 선택하면 해당 프로젝트의 변경관리 이력을 확인할 수 있습니다.
               </div>
             )}
           </section>

@@ -109,7 +109,9 @@ public class ProjectRevisionService {
 		ProjectRevision previous = revisions.isEmpty() ? null : revisions.get(0);
 		String contractSnapshot = previous == null ? json(currentContract(project)) : previous.getContractSnapshot();
 		String baseBudgetSnapshot = previous == null ? json(currentBudget(projectId)) : previous.getBudgetSnapshot();
-		String budgetSnapshot = baseBudgetSnapshot;
+		// A new revision must have its own execution budget.  Keep the prior budget only
+		// as the comparison baseline; never pre-populate the editable revision snapshot.
+		String budgetSnapshot = json(new BudgetSnapshot(List.of()));
 		int revisionNumber = revisions.stream().mapToInt(ProjectRevision::getRevisionNumber).max().orElse(1) + 1;
 		ProjectRevision revision = revisionRepository.save(new ProjectRevision(
 				"rev_" + UUID.randomUUID().toString().replace("-", ""),
@@ -220,7 +222,6 @@ public class ProjectRevisionService {
 	public void approveRevision(String projectId, String revisionId, String approvalId) {
 		ProjectRevision revision = revision(projectId, revisionId);
 		if (!"REQUESTED".equals(revision.getStatus())) throw new IllegalStateException("결재 대기 중인 변경 차수만 승인할 수 있습니다.");
-		boolean contractOnlyRevision = budget(revision.getBaseBudgetSnapshot()).details().equals(budget(revision.getBudgetSnapshot()).details());
 		Project project = project(projectId);
 		ProjectRevisionResponse changed = response(revision);
 		project.updateTargetProfitRate(changed.targetProfitRate());
@@ -266,9 +267,6 @@ public class ProjectRevisionService {
 				budgetChangeRepository.save(new BudgetChange(
 						"rev-budget-" + UUID.randomUUID().toString().replace("-", ""), item.getItemId(), revisionId, delta, ApprovalStatus.APPROVED));
 			}
-		}
-		if (contractOnlyRevision) {
-			revision.enableExecutionBudgetRewrite();
 		}
 		revision.approve();
 		revisionRepository.save(revision);
@@ -339,20 +337,25 @@ public class ProjectRevisionService {
 		return revisionRepository.findByProjectIdOrderByRevisionNumberDesc(projectId).stream()
 				.filter(revision -> "APPROVED".equals(revision.getStatus()))
 				.findFirst()
-				.map(revision -> {
-					List<BudgetDetail> details = budget(revision.getBudgetSnapshot()).details();
-					List<Detail> responseDetails = new java.util.ArrayList<>();
-					for (int index = 0; index < details.size(); index++) {
-						BudgetDetail detail = details.get(index);
-						responseDetails.add(new Detail(
-								"revision-" + revision.getRevisionId() + "-" + index,
-								detail.budgetItemId(), detail.categoryName(), detail.itemName(), detail.costType(),
-								detail.vendorDescription(), detail.unit(), zero(detail.quantity()), zero(detail.unitPrice()),
-								zero(detail.quantity()).multiply(zero(detail.unitPrice())), detail.evidenceLink(), detail.note()
-						));
-					}
-					return new ProjectRevisionBudgetView(revision.getRevisionNumber(), responseDetails);
-				});
+				.map(this::budgetView);
+	}
+
+	@Transactional(readOnly = true)
+	public Optional<ProjectRevisionBudgetView> latestOpenBudget(String projectId) {
+		project(projectId);
+		return revisionRepository.findByProjectIdOrderByRevisionNumberDesc(projectId).stream()
+				.filter(revision -> !"APPROVED".equals(revision.getStatus()) && !"REJECTED".equals(revision.getStatus()))
+				.findFirst()
+				.map(this::budgetView);
+	}
+
+	@Transactional(readOnly = true)
+	public Optional<ProjectRevisionBudgetView> latestWritableBudget(String projectId) {
+		project(projectId);
+		return revisionRepository.findByProjectIdOrderByRevisionNumberDesc(projectId).stream()
+				.filter(revision -> "DRAFT".equals(revision.getStatus()) || "CONTRACT_WRITTEN".equals(revision.getStatus()) || "BUDGET_WRITTEN".equals(revision.getStatus()))
+				.findFirst()
+				.map(this::budgetView);
 	}
 
 	@Transactional(readOnly = true)
@@ -388,6 +391,21 @@ public class ProjectRevisionService {
 				sumContract(baseContract.items()), sumContract(changedContract.items()), changedContract.targetProfitRate(), sumBudget(baseBudget.details()), sumBudget(changedBudget.details()),
 				baseContract.items(), changedContract.items(), baseBudget.details(), changedBudget.details()
 		);
+	}
+
+	private ProjectRevisionBudgetView budgetView(ProjectRevision revision) {
+		List<BudgetDetail> details = budget(revision.getBudgetSnapshot()).details();
+		List<Detail> responseDetails = new java.util.ArrayList<>();
+		for (int index = 0; index < details.size(); index++) {
+			BudgetDetail detail = details.get(index);
+			responseDetails.add(new Detail(
+					"revision-" + revision.getRevisionId() + "-" + index,
+					detail.budgetItemId(), detail.categoryName(), detail.itemName(), detail.costType(),
+					detail.vendorDescription(), detail.unit(), zero(detail.quantity()), zero(detail.unitPrice()),
+					zero(detail.quantity()).multiply(zero(detail.unitPrice())), detail.evidenceLink(), detail.note()
+			));
+		}
+		return new ProjectRevisionBudgetView(revision.getRevisionId(), revision.getRevisionNumber(), revision.getStatus(), responseDetails);
 	}
 
 	private ContractSnapshot currentContract(Project project) {
