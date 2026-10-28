@@ -28,7 +28,10 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 @Service
+@org.springframework.security.access.prepost.PreAuthorize("@businessPolicy.allow('PROJECT_READ')")
 public class PaymentRequestService {
+	@org.springframework.beans.factory.annotation.Autowired private com.construction.management.auth.BusinessPolicy businessPolicy;
+
 	public static final String TYPE_PAYMENT = "PAYMENT";
 	private final ProjectRepository projectRepository;
 	private final ProjectRevisionRepository revisionRepository;
@@ -51,6 +54,8 @@ public class PaymentRequestService {
 	}
 
 	@Transactional
+	@org.springframework.security.access.prepost.PreAuthorize("@businessPolicy.allow('PAYMENT_REQUEST')")
+	@com.construction.management.auth.BusinessAction
 	public void requestPayments(String projectId, PaymentRequestCreateRequest request) {
 		projectSettlementService.assertNotSettled(projectId);
 		Project project = projectRepository.findById(projectId).orElseThrow(() -> new EntityNotFoundException("프로젝트를 찾을 수 없습니다: " + projectId));
@@ -73,26 +78,26 @@ public class PaymentRequestService {
 			String approvalId = nextApprovalId();
 			String paymentRequestId = "PAY-REQ-" + UUID.randomUUID().toString().substring(0, 8).toUpperCase();
 			paymentRequestRepository.save(new PaymentRequest(paymentRequestId, projectId, poId, payableClaims.stream().map(ProgressClaim::getClaimId).collect(Collectors.joining(",")), requestedAmount, approvalId));
-			approvalRepository.save(new Approval(approvalId, projectId, TYPE_PAYMENT, paymentRequestId, po.getVendorName() + " 지급 승인 요청", requestedAmount, BigDecimal.ZERO, requestedAmount, "system", "승인 기성 미지급분 지급 요청"));
+			approvalRepository.save(new Approval(approvalId, projectId, TYPE_PAYMENT, paymentRequestId, po.getVendorName() + " 지급 승인 요청", requestedAmount, BigDecimal.ZERO, requestedAmount, com.construction.management.auth.CurrentActor.name(), "승인 기성 미지급분 지급 요청"));
 		}
 	}
 
 	@Transactional
+	@org.springframework.security.access.prepost.PreAuthorize("@businessPolicy.allow('APPROVAL_DECIDE')")
+	@com.construction.management.auth.BusinessAction
 	public void approve(Approval approval, ApprovalDecisionRequest request) {
 		PaymentRequest paymentRequest = getRequest(approval);
 		if (!ApprovalStatus.REQUESTED.name().equals(paymentRequest.getApprovalStatus())) throw new IllegalStateException("결재 대기 상태의 지급요청만 승인할 수 있습니다.");
 		List<ProgressClaim> claims = List.of(paymentRequest.getClaimIds().split(",")).stream().map(claimId -> progressClaimRepository.findById(claimId).orElseThrow(() -> new EntityNotFoundException("기성을 찾을 수 없습니다: " + claimId))).toList();
 		BigDecimal currentAmount = claims.stream().filter(claim -> claim.getApprovalStatus() == ApprovalStatus.APPROVED).map(this::remaining).reduce(BigDecimal.ZERO, BigDecimal::add);
 		if (currentAmount.compareTo(paymentRequest.getRequestedAmount()) != 0) throw new IllegalStateException("지급 대상 금액이 변경되었습니다. 기존 요청을 반려하고 다시 요청해야 합니다.");
-		for (ProgressClaim claim : claims) {
-			BigDecimal amount = remaining(claim);
-			if (amount.signum() > 0) actualPaymentRepository.save(new ActualPayment("PAY-" + UUID.randomUUID().toString().substring(0, 8), claim.getClaimId(), amount, LocalDate.now(), "지급결재 승인", request == null ? null : request.comment()));
-		}
 		paymentRequest.approve();
 		paymentRequestRepository.save(paymentRequest);
 	}
 
 	@Transactional
+	@org.springframework.security.access.prepost.PreAuthorize("@businessPolicy.allow('APPROVAL_DECIDE')")
+	@com.construction.management.auth.BusinessAction
 	public void reject(Approval approval) {
 		PaymentRequest paymentRequest = getRequest(approval);
 		paymentRequest.reject();

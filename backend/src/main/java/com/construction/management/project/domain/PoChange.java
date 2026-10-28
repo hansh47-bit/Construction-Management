@@ -10,7 +10,7 @@ import java.math.BigDecimal;
 
 @Entity
 @Table(name = "po_changes")
-public class PoChange {
+public class PoChange extends com.construction.management.auth.AuthoredEntity {
 
 	@Id
 	@Column(name = "change_id", nullable = false, length = 64)

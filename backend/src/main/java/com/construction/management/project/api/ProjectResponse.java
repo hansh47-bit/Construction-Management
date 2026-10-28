@@ -33,13 +33,16 @@ public record ProjectResponse(
 		@JsonProperty("contract_supply_amount")
 		BigDecimal contractSupplyAmount,
 		@JsonProperty("contract_total_amount")
-		BigDecimal contractTotalAmount
+		BigDecimal contractTotalAmount,
+        @JsonProperty("team_leader_name") String teamLeaderName,
+        @JsonProperty("manager_name") String managerName
 ) {
 	public static ProjectResponse from(Project project) {
 		return from(project, BigDecimal.ZERO, BigDecimal.ZERO);
 	}
 
-	public static ProjectResponse from(Project project, BigDecimal contractSupplyAmount, BigDecimal contractTotalAmount) {
+	public static ProjectResponse from(Project project, BigDecimal contractSupplyAmount, BigDecimal contractTotalAmount) { return from(project,contractSupplyAmount,contractTotalAmount,project.getTeamLeaderId(),project.getManagerId()); }
+ public static ProjectResponse from(Project project, BigDecimal contractSupplyAmount, BigDecimal contractTotalAmount,String teamLeaderName,String managerName) {
 		return new ProjectResponse(
 				project.getProjectId(),
 				project.getProjectCode(),
@@ -55,7 +58,7 @@ public record ProjectResponse(
 				project.getTargetProfitRate(),
 				project.getNote(),
 				contractSupplyAmount,
-				contractTotalAmount
+				contractTotalAmount, teamLeaderName, managerName
 		);
 	}
 }

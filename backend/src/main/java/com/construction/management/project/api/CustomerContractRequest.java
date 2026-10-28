@@ -6,6 +6,7 @@ import jakarta.validation.constraints.NotNull;
 import java.math.BigDecimal;
 import java.util.List;
 
+@com.fasterxml.jackson.annotation.JsonIgnoreProperties(ignoreUnknown=true)
 public record CustomerContractRequest(
 		@JsonProperty("target_profit_rate")
 		BigDecimal targetProfitRate,
@@ -13,7 +14,8 @@ public record CustomerContractRequest(
 		@NotNull
 		List<Item> items
 ) {
-	public record Item(
+	@com.fasterxml.jackson.annotation.JsonIgnoreProperties(ignoreUnknown=true)
+public record Item(
 			@JsonProperty("work_category")
 			String workCategory,
 			@JsonProperty("quoted_amount")

@@ -12,7 +12,7 @@ import java.time.LocalDateTime;
 
 @Entity
 @Table(name = "progress_claims")
-public class ProgressClaim {
+public class ProgressClaim extends com.construction.management.auth.AuthoredEntity {
 
 	@Id
 	@Column(name = "claim_id", nullable = false, length = 64)

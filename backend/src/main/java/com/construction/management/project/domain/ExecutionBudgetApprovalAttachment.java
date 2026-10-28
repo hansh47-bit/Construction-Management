@@ -9,7 +9,7 @@ import java.time.LocalDateTime;
 
 @Entity
 @Table(name = "execution_budget_approval_attachments")
-public class ExecutionBudgetApprovalAttachment {
+public class ExecutionBudgetApprovalAttachment extends com.construction.management.auth.AuthoredEntity {
 
 	@Id
 	@Column(name = "attachment_id", nullable = false, length = 64)

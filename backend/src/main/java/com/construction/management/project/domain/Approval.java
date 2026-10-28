@@ -13,7 +13,7 @@ import java.time.LocalDateTime;
 
 @Entity
 @Table(name = "approvals")
-public class Approval {
+public class Approval extends com.construction.management.auth.AuthoredEntity {
 
 	@Id
 	@Column(name = "approval_id", nullable = false, length = 64)
@@ -52,6 +52,8 @@ public class Approval {
 
 	@Column(name = "approver")
 	private String approver;
+	private String approverUserId;
+	private String cancelledUserId;
 
 	@Column(name = "comment", length = 1000)
 	private String comment;
@@ -89,7 +91,7 @@ public class Approval {
 		this.requestedAmount = requestedAmount == null ? BigDecimal.ZERO : requestedAmount;
 		this.previousAmount = previousAmount == null ? BigDecimal.ZERO : previousAmount;
 		this.varianceAmount = varianceAmount == null ? BigDecimal.ZERO : varianceAmount;
-		this.requestUser = requestUser;
+		this.requestUser = com.construction.management.auth.CurrentActor.optionalId() == null ? requestUser : com.construction.management.auth.CurrentActor.name();
 		this.requestReason = requestReason;
 		this.requestedAt = LocalDateTime.now();
 	}
@@ -111,21 +113,24 @@ public class Approval {
 
 	public void approve(String approver, String comment) {
 		this.status = ApprovalStatus.APPROVED;
-		this.approver = approver;
+		this.approver = com.construction.management.auth.CurrentActor.name();
+		this.approverUserId = com.construction.management.auth.CurrentActor.id();
 		this.comment = comment;
 		this.decidedAt = LocalDateTime.now();
 	}
 
 	public void reject(String approver, String comment) {
 		this.status = ApprovalStatus.REJECTED;
-		this.approver = approver;
+		this.approver = com.construction.management.auth.CurrentActor.name();
+		this.approverUserId = com.construction.management.auth.CurrentActor.id();
 		this.comment = comment;
 		this.decidedAt = LocalDateTime.now();
 	}
 
 	public void cancel(String cancelledBy, String cancellationReason) {
 		this.status = ApprovalStatus.CANCELLED;
-		this.cancelledBy = cancelledBy;
+		this.cancelledBy = com.construction.management.auth.CurrentActor.name();
+		this.cancelledUserId = com.construction.management.auth.CurrentActor.id();
 		this.cancellationReason = cancellationReason;
 		this.cancelledAt = LocalDateTime.now();
 	}
@@ -141,6 +146,8 @@ public class Approval {
 	public String getRequestUser() { return requestUser; }
 	public String getRequestReason() { return requestReason; }
 	public ApprovalStatus getStatus() { return status; }
+	public String getApproverUserId() { return approverUserId; }
+	public String getCancelledUserId() { return cancelledUserId; }
 	public String getApprover() { return approver; }
 	public String getComment() { return comment; }
 	public LocalDateTime getRequestedAt() { return requestedAt; }

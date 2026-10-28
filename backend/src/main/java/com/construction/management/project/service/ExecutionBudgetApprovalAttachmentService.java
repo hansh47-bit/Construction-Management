@@ -18,7 +18,10 @@ import org.springframework.util.StringUtils;
 import org.springframework.web.multipart.MultipartFile;
 
 @Service
+@org.springframework.security.access.prepost.PreAuthorize("@businessPolicy.allow('PROJECT_READ')")
 public class ExecutionBudgetApprovalAttachmentService {
+	@org.springframework.beans.factory.annotation.Autowired private com.construction.management.auth.BusinessPolicy businessPolicy;
+
 
 	private final ExecutionBudgetApprovalAttachmentRepository attachmentRepository;
 	private final Path uploadRoot;
@@ -32,6 +35,7 @@ public class ExecutionBudgetApprovalAttachmentService {
 	}
 
 	@Transactional
+	@org.springframework.security.access.prepost.PreAuthorize("@businessPolicy.allow('BUDGET_REQUEST')")
 	public void saveAll(String projectId, String approvalId, List<MultipartFile> files) {
 		if (files == null || files.isEmpty()) {
 			return;
@@ -78,7 +82,9 @@ public class ExecutionBudgetApprovalAttachmentService {
 	}
 
 	@Transactional(readOnly = true)
+	@org.springframework.security.access.prepost.PreAuthorize("@businessPolicy.allow('APPROVAL_READ')")
 	public ExecutionBudgetApprovalAttachment getFile(String projectId, String approvalId, String attachmentId) {
+		businessPolicy.approval(approvalId);
 		ExecutionBudgetApprovalAttachment attachment = attachmentRepository.findById(attachmentId)
 				.orElseThrow(() -> new EntityNotFoundException("결재 첨부파일을 찾을 수 없습니다."));
 		if (!projectId.equals(attachment.getProjectId()) || !approvalId.equals(attachment.getApprovalId())) {
@@ -87,6 +93,7 @@ public class ExecutionBudgetApprovalAttachmentService {
 		return attachment;
 	}
 
+	@org.springframework.security.access.prepost.PreAuthorize("@businessPolicy.allow('APPROVAL_READ')")
 	public Resource loadFileResource(ExecutionBudgetApprovalAttachment attachment) {
 		try {
 			Resource resource = new UrlResource(Path.of(attachment.getFilePath()).toUri());
@@ -100,6 +107,7 @@ public class ExecutionBudgetApprovalAttachmentService {
 	}
 
 	@Transactional
+	@org.springframework.security.access.prepost.PreAuthorize("@businessPolicy.allow('PROJECT_DELETE')")
 	public void deleteAllForProject(String projectId) {
 		List<ExecutionBudgetApprovalAttachment> attachments = attachmentRepository.findByProjectIdOrderByUploadedAtAsc(projectId);
 		try {

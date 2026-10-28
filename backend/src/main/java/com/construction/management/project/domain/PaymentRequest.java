@@ -10,7 +10,7 @@ import java.time.LocalDateTime;
 
 @Entity
 @Table(name = "payment_requests")
-public class PaymentRequest {
+public class PaymentRequest extends com.construction.management.auth.AuthoredEntity {
 	@Id
 	@Column(name = "payment_request_id", nullable = false, length = 64)
 	private String paymentRequestId;

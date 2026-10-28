@@ -53,7 +53,10 @@ import org.springframework.transaction.annotation.Transactional;
 import org.springframework.util.StringUtils;
 
 @Service
+@org.springframework.security.access.prepost.PreAuthorize("@businessPolicy.allow('PROJECT_READ')")
 public class ProjectRevisionService {
+	@org.springframework.beans.factory.annotation.Autowired private com.construction.management.auth.BusinessPolicy businessPolicy;
+
 	private final ProjectRepository projectRepository;
 	private final CustomerContractItemRepository contractItemRepository;
 	private final ProjectExecutionBudgetDetailRepository budgetDetailRepository;
@@ -102,6 +105,8 @@ public class ProjectRevisionService {
 	}
 
 	@Transactional
+	@org.springframework.security.access.prepost.PreAuthorize("@businessPolicy.allow('CHANGE_WRITE')")
+	@com.construction.management.auth.BusinessAction
 	public ProjectRevisionResponse create(String projectId, ProjectRevisionCreateRequest request) {
 		projectSettlementService.assertNotSettled(projectId);
 		Project project = project(projectId);
@@ -128,17 +133,20 @@ public class ProjectRevisionService {
 	}
 
 	@Transactional(readOnly = true)
+	@org.springframework.security.access.prepost.PreAuthorize("@businessPolicy.allow('CHANGE_READ')")
 	public List<ProjectRevisionResponse> list(String projectId) {
 		project(projectId);
 		return revisionRepository.findByProjectIdOrderByRevisionNumberDesc(projectId).stream().map(this::response).toList();
 	}
 
 	@Transactional(readOnly = true)
+	@org.springframework.security.access.prepost.PreAuthorize("@businessPolicy.allow('CHANGE_READ')")
 	public ProjectRevisionResponse get(String projectId, String revisionId) {
 		return response(revision(projectId, revisionId));
 	}
 
 	@Transactional(readOnly = true)
+	@org.springframework.security.access.prepost.PreAuthorize("@businessPolicy.allow('CHANGE_READ')")
 	public ProjectRevisionHistoryResponse history(String projectId, String revisionId) {
 		ProjectRevision revision = revision(projectId, revisionId);
 		List<PurchaseOrder> purchaseOrders = purchaseOrderRepository.findByProjectIdAndRevisionIdOrderByPoIdDesc(projectId, revisionId);
@@ -164,7 +172,10 @@ public class ProjectRevisionService {
 	}
 
 	@Transactional
+	@org.springframework.security.access.prepost.PreAuthorize("@businessPolicy.allow('CHANGE_WRITE')")
+	@com.construction.management.auth.BusinessAction
 	public ProjectRevisionResponse saveContract(String projectId, String revisionId, CustomerContractRequest request) {
+		businessPolicy.ownEntity(com.construction.management.project.domain.ProjectRevision.class, revisionId);
 		ProjectRevision revision = revision(projectId, revisionId);
 		ensureContractEditable(revision);
 		List<ContractItem> items = request.items().stream()
@@ -176,7 +187,10 @@ public class ProjectRevisionService {
 	}
 
 	@Transactional
+	@org.springframework.security.access.prepost.PreAuthorize("@businessPolicy.allow('CHANGE_WRITE')")
+	@com.construction.management.auth.BusinessAction
 	public ProjectRevisionResponse saveBudget(String projectId, String revisionId, ExecutionBudgetDetailRequest request) {
+		businessPolicy.ownEntity(com.construction.management.project.domain.ProjectRevision.class, revisionId);
 		ProjectRevision revision = revision(projectId, revisionId);
 		ensureContractWritten(revision);
 		List<BudgetDetail> details = request.details().stream()
@@ -192,7 +206,10 @@ public class ProjectRevisionService {
 	}
 
 	@Transactional
+	@org.springframework.security.access.prepost.PreAuthorize("@businessPolicy.allow('CHANGE_REQUEST')")
+	@com.construction.management.auth.BusinessAction
 	public ApprovalResponse requestApproval(String projectId, String revisionId, ApprovalRequest request) {
+		businessPolicy.ownEntity(com.construction.management.project.domain.ProjectRevision.class, revisionId);
 		ProjectRevision revision = revision(projectId, revisionId);
 		if (!"CONTRACT_WRITTEN".equals(revision.getStatus()) && !"BUDGET_WRITTEN".equals(revision.getStatus())) {
 			throw new IllegalStateException("계약 변경 내용을 저장한 차수만 결재 요청할 수 있습니다.");
@@ -210,7 +227,7 @@ public class ProjectRevisionService {
 				detail.contractTotal(),
 				detail.baseContractTotal(),
 				detail.contractTotal().subtract(detail.baseContractTotal()),
-				request != null && StringUtils.hasText(request.requestUser()) ? request.requestUser() : "system",
+				com.construction.management.auth.CurrentActor.name(),
 				request != null && StringUtils.hasText(request.requestReason()) ? request.requestReason() : revision.getReason()
 		));
 		revision.markApprovalRequested();
@@ -219,6 +236,7 @@ public class ProjectRevisionService {
 	}
 
 	@Transactional
+	@org.springframework.security.access.prepost.PreAuthorize("@businessPolicy.allow('APPROVAL_DECIDE')")
 	public void approveRevision(String projectId, String revisionId, String approvalId) {
 		ProjectRevision revision = revision(projectId, revisionId);
 		if (!"REQUESTED".equals(revision.getStatus())) throw new IllegalStateException("결재 대기 중인 변경 차수만 승인할 수 있습니다.");
@@ -281,6 +299,7 @@ public class ProjectRevisionService {
 	}
 
 	@Transactional
+	@org.springframework.security.access.prepost.PreAuthorize("@businessPolicy.allow('BUDGET_WRITE')")
 	public void updateApprovedRevisionBudgetSnapshot(String projectId, List<ProjectExecutionBudgetDetail> details) {
 		ProjectRevision revision = revisionRepository.findByProjectIdOrderByRevisionNumberDesc(projectId).stream()
 				.filter(this::isExecutionBudgetRewriteCandidate)
@@ -302,6 +321,7 @@ public class ProjectRevisionService {
 	}
 
 	@Transactional
+	@org.springframework.security.access.prepost.PreAuthorize("@businessPolicy.allow('BUDGET_REQUEST')")
 	public void consumeExecutionBudgetRewrite(String projectId) {
 		revisionRepository.findByProjectIdOrderByRevisionNumberDesc(projectId).stream()
 				.filter(this::isExecutionBudgetRewriteCandidate)
@@ -313,6 +333,7 @@ public class ProjectRevisionService {
 	}
 
 	@Transactional
+	@org.springframework.security.access.prepost.PreAuthorize("@businessPolicy.allow('APPROVAL_DECIDE')")
 	public void rejectRevision(String projectId, String revisionId) {
 		ProjectRevision revision = revision(projectId, revisionId);
 		if (!"REQUESTED".equals(revision.getStatus())) throw new IllegalStateException("결재 대기 중인 변경 차수만 반려할 수 있습니다.");
@@ -389,7 +410,7 @@ public class ProjectRevisionService {
 		return new ProjectRevisionResponse(
 				revision.getRevisionId(), revision.getProjectId(), revision.getRevisionNumber(), revision.getTitle(), revision.getReason(), revision.getStatus(), revision.getCreatedAt(),
 				sumContract(baseContract.items()), sumContract(changedContract.items()), changedContract.targetProfitRate(), sumBudget(baseBudget.details()), sumBudget(changedBudget.details()),
-				baseContract.items(), changedContract.items(), baseBudget.details(), changedBudget.details()
+				baseContract.items(), changedContract.items(), baseBudget.details(), changedBudget.details(), revision.getCreatedUserId()
 		);
 	}
 

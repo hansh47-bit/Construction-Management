@@ -1,3 +1,7 @@
+import { UserMenu } from './features/auth/AuthProvider'
+import { useAuth } from './features/auth/auth'
+import { DraftPermissions, WriteScope } from './features/auth/Permissions'
+import { apiJson } from './lib/api-client'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import type { ApprovalItem, CustomerContract, CustomerContractItem, ExecutionBudgetDetail, ExecutionBudgetDetailResponse, ExecutionBudgetSummaryItem, IntegratedSummary, ProgressPaymentResponse, ProjectSettlement, PurchaseOrderDraft, PurchaseOrderHistoryItem, PurchaseOrderHistoryResponse, VendorComparisonItem, VendorComparisonResponse } from './types/domain'
 import { approvalApi } from './features/approvals/api'
@@ -75,6 +79,8 @@ function newVendorComparison(itemId = 'EX-001', suffix = 'A'): VendorComparisonI
 }
 
 function App() {
+  const { can, notice } = useAuth()
+  const [draftAccessResult, setDraftAccessResult] = useState<{ projectId: string; itemId: string; values: Record<string, boolean> } | null>(null)
   const [activePage, setActivePage] = useState<'projects' | 'executive' | 'approvals' | 'changes'>('projects')
   const [selectedProjectId, setSelectedProjectId] = useState<string | null>(null)
   const [summary, setSummary] = useState<IntegratedSummary | null>(null)
@@ -84,6 +90,7 @@ function App() {
   const [executionDetails, setExecutionDetails] = useState<ExecutionBudgetDetail[]>([])
   const [executionBudgetApprovalFiles, setExecutionBudgetApprovalFiles] = useState<File[]>([])
   const [selectedExecutionItemId, setSelectedExecutionItemId] = useState('EX-001')
+  const draftAccess = draftAccessResult?.projectId === selectedProjectId && draftAccessResult.itemId === selectedExecutionItemId ? draftAccessResult.values : { CONTRACT_WRITE: false, BUDGET_WRITE: false, PROCUREMENT_WRITE: false }
   const [revisionProcurementItemIds, setRevisionProcurementItemIds] = useState<string[] | null>(null)
   const [vendorComparison, setVendorComparison] = useState<VendorComparisonResponse | null>(null)
   const [vendorComparisons, setVendorComparisons] = useState<VendorComparisonItem[]>([])
@@ -190,12 +197,20 @@ function App() {
     void loadPendingApprovalCount()
   }, [])
 
+  useEffect(() => {
+    if (!selectedProjectId) return
+    let live = true
+    void apiJson<Record<string, boolean>>(`/api/v1/projects/${selectedProjectId}/access?itemId=${encodeURIComponent(selectedExecutionItemId)}`).then(value => { if (live) setDraftAccessResult({ projectId: selectedProjectId, itemId: selectedExecutionItemId, values: value }) }).catch(() => {})
+    return () => { live = false }
+  }, [selectedProjectId, selectedExecutionItemId])
+
   const selectedProject = useMemo(
     () => projects.find((project) => project.project_id === selectedProjectId) ?? summary?.project_info,
     [projects, selectedProjectId, summary],
   )
 
   async function startConstruction() {
+    if (!can('PROJECT_STATUS')) return
     if (!selectedProjectId || !selectedProject) return
     if (!window.confirm(`“${selectedProject.project_name}” 프로젝트의 공사를 시작하시겠습니까? 상태가 공사진행으로 변경됩니다.`)) {
       return
@@ -216,6 +231,7 @@ function App() {
   }
 
   async function synchronizePreparationStatus() {
+    if (!can('PROJECT_STATUS')) return
     if (!selectedProjectId || !selectedProject) return
     if (!window.confirm(`“${selectedProject.project_name}” 프로젝트의 승인된 실행예산을 반영해 상태를 공사준비로 변경하시겠습니까?`)) {
       return
@@ -236,6 +252,7 @@ function App() {
   }
 
   async function loadCustomerContract(projectId: string) {
+    if (!can('CONTRACT_READ')) return
     try {
       const response = await contractApi.get(projectId)
       if (!response.ok) {
@@ -252,6 +269,7 @@ function App() {
   }
 
   async function saveCustomerContract(): Promise<boolean> {
+    if (!can('CONTRACT_WRITE') || draftAccess.CONTRACT_WRITE === false) return false
     if (!selectedProjectId) {
       return false
     }
@@ -298,6 +316,7 @@ function App() {
   }
 
   async function uploadContractFile(file: File | null) {
+    if (!can('CONTRACT_WRITE') || draftAccess.CONTRACT_WRITE === false) return
     if (!selectedProjectId || !file) {
       return
     }
@@ -318,6 +337,7 @@ function App() {
   }
 
   async function deleteContractFile(fileId: string) {
+    if (!can('CONTRACT_WRITE') || draftAccess.CONTRACT_WRITE === false) return
     if (!selectedProjectId) {
       return
     }
@@ -335,6 +355,7 @@ function App() {
   }
 
   async function loadExecutionBudgetDetails(projectId: string) {
+    if (!can('BUDGET_READ')) return
     try {
       const [response, procurementResponse] = await Promise.all([executionBudgetApi.get(projectId), revisionApi.procurementItems(projectId)])
       if (!response.ok) {
@@ -362,6 +383,7 @@ function App() {
   }
 
   async function saveExecutionBudgetDetails() {
+    if (!can('BUDGET_WRITE') || draftAccess.BUDGET_WRITE === false) return
     if (!selectedProjectId) {
       return
     }
@@ -396,6 +418,7 @@ function App() {
   }
 
   async function requestExecutionBudgetApproval() {
+    if (!can('BUDGET_REQUEST')) return
     if (!selectedProjectId) return
     if (executionBudget?.applied_revision_id) {
       const response = await revisionApi.requestApproval(selectedProjectId, executionBudget.applied_revision_id)
@@ -411,7 +434,7 @@ function App() {
     }
     const formData = new FormData()
     formData.append('request', new Blob([
-      JSON.stringify({ request_user: 'system', request_reason: '최초 실행예산 승인 요청' }),
+      JSON.stringify({ request_reason: '최초 실행예산 승인 요청' }),
     ], { type: 'application/json' }))
     executionBudgetApprovalFiles.forEach((file) => formData.append('files', file))
     const response = await executionBudgetApi.requestApproval(selectedProjectId, formData)
@@ -426,6 +449,7 @@ function App() {
   }
 
   async function loadApprovals() {
+    if (!can('APPROVAL_READ')) return
     void loadPendingApprovalCount()
     if (!selectedProjectId && activePage !== 'approvals') return
     const params = new URLSearchParams()
@@ -443,6 +467,7 @@ function App() {
   }
 
   async function loadApprovalDetail(approvalId: string) {
+    if (!can('APPROVAL_READ')) return
     const response = await approvalApi.detail(approvalId)
     if (!response.ok) {
       setError(`결재 상세 조회 실패: ${response.status}`)
@@ -452,10 +477,11 @@ function App() {
   }
 
   async function decideApproval(approvalId: string, decision: 'approve' | 'reject' | 'cancel') {
+    if (!can('APPROVAL_DECIDE')) return
     if (decision === 'cancel' && !window.confirm('승인 완료된 실행예산을 승인취소하고 재작업 상태로 전환할까요? 기존 승인 이력은 보존됩니다.')) {
       return
     }
-    const response = await approvalApi.decide(approvalId, decision, { approver: '대표', comment: decision === 'approve' ? '승인' : rejectComment })
+    const response = await approvalApi.decide(approvalId, decision, { comment: decision === 'approve' ? '승인' : rejectComment })
     if (!response.ok) {
       setError(`결재 처리 실패: ${response.status}`)
       return
@@ -519,6 +545,7 @@ function App() {
   }
 
   async function loadVendorComparisons(projectId: string, itemId: string) {
+    if (!can('PROCUREMENT_READ')) return
     try {
       const response = await procurementApi.comparisons(projectId, itemId)
       if (!response.ok) {
@@ -535,6 +562,7 @@ function App() {
   }
 
   async function loadPurchaseOrderDraft(projectId: string, itemId: string, showError = true) {
+    if (!can('PROCUREMENT_READ')) return
     const response = await procurementApi.draft(projectId, itemId)
     if (!response.ok) {
       setPurchaseOrderDraft(null)
@@ -546,6 +574,7 @@ function App() {
   }
 
   async function loadPurchaseOrders(projectId: string) {
+    if (!can('PROCUREMENT_READ')) return
     const response = await procurementApi.orders(projectId)
     if (!response.ok) {
       setError(`발주 이력 조회 실패: ${response.status}`)
@@ -557,6 +586,7 @@ function App() {
   }
 
   async function persistVendorComparisons(): Promise<VendorComparisonResponse | null> {
+    if (!can('PROCUREMENT_WRITE') || draftAccess.PROCUREMENT_WRITE === false) return null
     if (!selectedProjectId || !selectedExecutionItemId) return null
     const response = await procurementApi.saveComparisons(selectedProjectId, selectedExecutionItemId, {
       comparisons: vendorComparisons
@@ -586,6 +616,7 @@ function App() {
   }
 
   async function loadPendingApprovalCount() {
+    if (!can('APPROVAL_READ')) return
     try {
       const response = await approvalApi.list(new URLSearchParams({ status: 'REQUESTED' }))
       if (!response.ok) return
@@ -601,6 +632,7 @@ function App() {
   }
 
   async function requestPurchaseOrder() {
+    if (!can('PROCUREMENT_REQUEST')) return
     if (!selectedProjectId || !selectedExecutionItemId) return
     const selected = vendorComparisons.find((comparison) => comparison.is_selected)
     if (!selected || !selected.vendor_name.trim() || selected.quoted_amount <= 0 || !selected.selection_reason?.trim()) {
@@ -633,6 +665,7 @@ function App() {
   }
 
   async function uploadVendorComparisonFile(index: number, file: File) {
+    if (!can('PROCUREMENT_WRITE') || draftAccess.PROCUREMENT_WRITE === false) return
     if (!selectedProjectId || !selectedExecutionItemId) return
     const saved = await persistVendorComparisons()
     const comparison = saved?.comparisons[index]
@@ -669,6 +702,7 @@ function App() {
   }
 
   async function loadProgressPayments(projectId: string): Promise<ProgressPaymentResponse | null> {
+    if (!can('PROGRESS_READ')) return null
     try {
       const response = await paymentApi.status(projectId)
       if (!response.ok) throw new Error(`기성/지급 현황 조회 실패: ${response.status}`)
@@ -688,6 +722,7 @@ function App() {
   }
 
   async function loadSettlement(projectId: string) {
+    if (!can('SETTLEMENT_READ')) return
     try {
       const response = await settlementApi.get(projectId)
       if (!response.ok) throw new Error(`준공정산 조회 실패: ${response.status}`)
@@ -709,6 +744,7 @@ function App() {
   }
 
   async function requestSettlementApproval() {
+    if (!can('SETTLEMENT_REQUEST')) return
     if (!selectedProjectId) return
     const response = await settlementApi.requestApproval(selectedProjectId, {
       uncollected_receivable: toNumber(settlementForm.uncollected_receivable),
@@ -735,6 +771,7 @@ function App() {
   }
 
   async function createProgressClaim() {
+    if (!can('PROGRESS_WRITE')) return
     if (!selectedProjectId || !selectedPoId) return
     const response = await paymentApi.createClaim(selectedProjectId, { po_id: selectedPoId, degree: Number(claimForm.degree || 0), claim_amount: toNumber(claimForm.claim_amount) })
     if (!response.ok) {
@@ -748,6 +785,7 @@ function App() {
   }
 
   async function deleteProgressClaim(claimId: string) {
+    if (!can('PROGRESS_WRITE')) return
     if (!selectedProjectId || !window.confirm('결재 대기 또는 반려된 기성 건을 삭제하시겠습니까? 연결된 결재 요청도 함께 삭제됩니다.')) return
     const response = await paymentApi.deleteClaim(selectedProjectId, claimId)
     if (!response.ok) {
@@ -760,6 +798,7 @@ function App() {
   }
 
   async function requestPaymentApprovals() {
+    if (!can('PAYMENT_REQUEST')) return
     if (!selectedProjectId || selectedPaymentPoIds.length === 0) return
     const response = await paymentApi.requestPayments(selectedProjectId, { po_ids: selectedPaymentPoIds })
     if (!response.ok) {
@@ -845,7 +884,7 @@ function App() {
   }, [executionBudget?.approval_status, executionDetails])
 
   return (
-    <main className="min-h-screen bg-[#f5f7fb] text-slate-900">
+    <DraftPermissions access={draftAccess}><main className="min-h-screen bg-[#f5f7fb] text-slate-900">
       <header className="sticky top-0 z-40 border-b border-slate-200 bg-white/95 shadow-sm backdrop-blur">
         <div className="mx-auto w-full max-w-[1440px] px-4 sm:px-6 lg:px-8">
           <div className="flex min-h-16 items-center justify-between gap-4">
@@ -854,8 +893,8 @@ function App() {
               <p className="text-[11px] font-medium text-slate-400">공사 통합관리</p>
             </button>
             <div className="flex items-center gap-3">
-              {activePage === 'projects' && <button type="button" onClick={() => setIsModalOpen(true)} className="inline-flex items-center justify-center gap-2 rounded-lg bg-blue-700 px-3.5 py-2 text-sm font-bold text-white shadow-sm hover:bg-blue-800"><FolderPlus className="h-4 w-4" aria-hidden="true" />프로젝트 등록</button>}
-              <span className="hidden rounded-full bg-blue-50 px-3 py-1.5 text-xs font-bold text-blue-700 sm:inline">대표이사</span>
+              {activePage === 'projects' && can('PROJECT_CREATE') && <button type="button" onClick={() => setIsModalOpen(true)} className="inline-flex items-center justify-center gap-2 rounded-lg bg-blue-700 px-3.5 py-2 text-sm font-bold text-white shadow-sm hover:bg-blue-800"><FolderPlus className="h-4 w-4" aria-hidden="true" />프로젝트 등록</button>}
+              <UserMenu />
             </div>
           </div>
           <nav className="-mb-px flex items-end gap-1 overflow-x-auto" aria-label="최상위 메뉴">
@@ -864,7 +903,7 @@ function App() {
               ['projects', '프로젝트 현황'],
               ['approvals', '통합결재함'],
               ['changes', '변경관리 이력'],
-            ] as const).map(([page, label]) => (
+            ] as const).filter(([page]) => can(page === 'executive' ? 'DASHBOARD_READ' : page === 'approvals' ? 'APPROVAL_READ' : page === 'changes' ? 'CHANGE_READ' : 'PROJECT_READ')).map(([page, label]) => (
               <button key={page} type="button" onClick={() => setActivePage(page)} className={`relative shrink-0 border-b-2 px-4 py-3 text-sm font-bold transition ${activePage === page ? 'border-blue-600 text-blue-700' : 'border-transparent text-slate-500 hover:border-slate-300 hover:text-slate-800'}`}>
                 {label}{page === 'approvals' && pendingApprovalCount > 0 && <span className="ml-1.5 inline-flex min-w-5 items-center justify-center rounded-full bg-rose-500 px-1.5 py-0.5 text-[10px] font-black text-white">{pendingApprovalCount}</span>}
               </button>
@@ -875,6 +914,7 @@ function App() {
 
       <div className="mx-auto flex w-full max-w-[1440px] flex-col gap-6 px-4 py-6 sm:px-6 lg:px-8">
 
+        {notice && <p role="status" className="rounded bg-amber-50 p-3 text-sm">{notice}</p>}
         {error && (
           <section className="flex items-start gap-3 rounded-md border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
             <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" aria-hidden="true" />
@@ -915,7 +955,7 @@ function App() {
 
             <section ref={tabRef} className="scroll-mt-36">
               <div className="flex gap-1 overflow-x-auto border-b border-slate-200">
-                {projectTabs.map((tab) => (
+                {projectTabs.filter(tab => can(tab === '고객 견적·계약 관리' ? 'CONTRACT_READ' : tab === '세부실행예산' ? 'BUDGET_READ' : ['업체 비교견적', '계약/발주 이력'].includes(tab) ? 'PROCUREMENT_READ' : tab === '기성 및 지급 현황' ? 'PROGRESS_READ' : tab === '준공정산' ? 'SETTLEMENT_READ' : 'SITE_READ')).map((tab) => (
                   <button
                     key={tab}
                     type="button"
@@ -929,8 +969,8 @@ function App() {
                 ))}
               </div>
               <div className="pt-6">
-                {activeTab === '고객 견적·계약 관리' && contract && (
-                  <ContractManagementPanel
+                {activeTab === '고객 견적·계약 관리' && can('CONTRACT_READ') && contract && (
+                  <WriteScope permission="CONTRACT_WRITE"><ContractManagementPanel
                     contract={contract}
                     contractItems={contractItems}
                     contractTotal={contractTotal}
@@ -945,10 +985,10 @@ function App() {
                     updateContractItem={updateContractItem}
                     addContractItem={addContractItem}
                     removeContractItem={removeContractItem}
-                  />
+                  /></WriteScope>
                 )}
-                {activeTab === '세부실행예산' && executionBudget && (
-                  <ExecutionBudgetDetailPanel
+                {activeTab === '세부실행예산' && can('BUDGET_READ') && executionBudget && (
+                  <WriteScope permission="BUDGET_WRITE"><ExecutionBudgetDetailPanel
                     executionBudget={executionBudget}
                     details={executionDetails}
                     summary={executionSummary}
@@ -961,10 +1001,10 @@ function App() {
                     updateExecutionDetail={updateExecutionDetail}
                     addExecutionDetail={addExecutionDetail}
                     removeExecutionDetail={removeExecutionDetail}
-                  />
+                  /></WriteScope>
                 )}
-                {activeTab === '업체 비교견적' && executionBudget && vendorComparison && (
-                  <VendorComparisonPanel
+                {activeTab === '업체 비교견적' && can('PROCUREMENT_READ') && executionBudget && vendorComparison && (
+                  <WriteScope permission="PROCUREMENT_WRITE"><VendorComparisonPanel
                     executionBudget={executionBudget}
                     revisionProcurementItemIds={revisionProcurementItemIds}
                     selectedExecutionItemId={selectedExecutionItemId}
@@ -979,13 +1019,15 @@ function App() {
                     removeVendorComparison={removeVendorComparison}
                     uploadVendorComparisonFile={uploadVendorComparisonFile}
                     openPurchaseOrderHistory={() => moveToTab('계약/발주 이력')}
-                  />
+                  /></WriteScope>
                 )}
-                {activeTab === '계약/발주 이력' && (
+                {activeTab === '계약/발주 이력' && can('PROCUREMENT_READ') && (
                   <PurchaseOrderHistoryPanel purchaseOrders={purchaseOrderHistory} revisionNumber={purchaseOrderHistoryRevision} />
                 )}
-                {activeTab === '기성 및 지급 현황' && progressPayment && (
+                {activeTab === '기성 및 지급 현황' && can('PROGRESS_READ') && progressPayment && (
                   <ProgressPaymentPanel
+                    projectId={selectedProjectId!}
+                    onPaymentRecorded={() => { void loadProgressPayments(selectedProjectId!); void projectApi.integratedSummary(selectedProjectId!).then(async r => { if (r.ok) setSummary(await r.json()) }) }}
                     progressPayment={progressPayment}
                     selectedPoId={selectedPoId}
                     setSelectedPoId={(poId) => {
@@ -1002,19 +1044,19 @@ function App() {
                     requestPaymentApprovals={requestPaymentApprovals}
                   />
                 )}
-                {activeTab === '현장 작업일지' && selectedProjectId && (
+                {activeTab === '현장 작업일지' && can('SITE_READ') && selectedProjectId && (
                   <DailyLogPanel project={selectedProject} projectId={selectedProjectId} />
                 )}
-                {activeTab === '현장 회의록' && selectedProjectId && (
+                {activeTab === '현장 회의록' && can('SITE_READ') && selectedProjectId && (
                   <MeetingMinutesPanel project={selectedProject} projectId={selectedProjectId} />
                 )}
-                {activeTab === '준공정산' && settlement && (
-                  <SettlementPanel
+                {activeTab === '준공정산' && can('SETTLEMENT_READ') && settlement && (
+                  <WriteScope permission="SETTLEMENT_REQUEST"><SettlementPanel
                     settlement={settlement}
                     form={settlementForm}
                     setForm={setSettlementForm}
                     requestSettlementApproval={requestSettlementApproval}
-                  />
+                  /></WriteScope>
                 )}
                 {activeTab !== '고객 견적·계약 관리' && activeTab !== '세부실행예산' && activeTab !== '업체 비교견적' && activeTab !== '계약/발주 이력' && activeTab !== '기성 및 지급 현황' && activeTab !== '현장 작업일지' && activeTab !== '현장 회의록' && activeTab !== '준공정산' && (
                   <div className="rounded-md border border-dashed border-slate-300 bg-slate-50 p-8 text-center text-sm text-slate-500">
@@ -1028,7 +1070,7 @@ function App() {
           </>
         )}
 
-        {activePage === 'approvals' && (
+        {activePage === 'approvals' && can('APPROVAL_READ') && (
           <section className="rounded-md border border-slate-200 bg-white p-4 shadow-sm">
             <ApprovalInboxPanel
               approvals={approvals}
@@ -1047,9 +1089,9 @@ function App() {
           </section>
         )}
 
-        {activePage === 'executive' && <ExecutiveDashboard />}
+        {activePage === 'executive' && can('DASHBOARD_READ') && <ExecutiveDashboard />}
 
-        {activePage === 'changes' && (
+        {activePage === 'changes' && can('CHANGE_READ') && (
           <section className="rounded-md border border-slate-200 bg-white p-4 shadow-sm">
             <div className="mb-6 flex flex-col gap-3 border-b border-slate-200 pb-4 sm:flex-row sm:items-end sm:justify-between">
               <div>
@@ -1094,7 +1136,7 @@ function App() {
           onSubmit={submitProject}
         />
       )}
-    </main>
+    </main></DraftPermissions>
   )
 }
 

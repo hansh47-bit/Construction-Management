@@ -1,5 +1,5 @@
-import { apiUrl } from '../../lib/api-client'
+import { apiUrl, apiFetch } from '../../lib/api-client'
 
 export function getExecutiveDashboard() {
-  return fetch(apiUrl('/api/dashboard'))
+  return apiFetch(apiUrl('/api/dashboard'))
 }

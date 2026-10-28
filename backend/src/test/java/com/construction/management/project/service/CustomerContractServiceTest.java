@@ -24,7 +24,10 @@ import org.junit.jupiter.api.io.TempDir;
 
 class CustomerContractServiceTest {
 
-	@TempDir
+	@org.junit.jupiter.api.BeforeEach
+ void authenticate() { org.springframework.security.core.context.SecurityContextHolder.getContext().setAuthentication(org.springframework.security.authentication.UsernamePasswordAuthenticationToken.authenticated(new com.construction.management.auth.SessionUser("test-ceo",0,"테스트 대표","CEO"), null, java.util.List.of())); }
+ @org.junit.jupiter.api.AfterEach void clearAuth() { org.springframework.security.core.context.SecurityContextHolder.clearContext(); }
+ @TempDir
 	Path uploadRoot;
 
 	@Test
@@ -52,6 +55,7 @@ class CustomerContractServiceTest {
 				uploadRoot.toString()
 		);
 
+        org.springframework.test.util.ReflectionTestUtils.setField(service,"businessPolicy",mock(com.construction.management.auth.BusinessPolicy.class));
 		service.saveContract("project-1", new CustomerContractRequest(
 				BigDecimal.valueOf(45),
 				List.of(new CustomerContractRequest.Item("목공", BigDecimal.valueOf(1_000_000), BigDecimal.valueOf(1_000_000), BigDecimal.valueOf(100_000), null))
@@ -97,6 +101,7 @@ class CustomerContractServiceTest {
 				uploadRoot.toString()
 		);
 
+        org.springframework.test.util.ReflectionTestUtils.setField(service,"businessPolicy",mock(com.construction.management.auth.BusinessPolicy.class));
 		CustomerContractResponse response = service.deleteFile("project-1", "file-1");
 
 		assertThat(storedFile).doesNotExist();

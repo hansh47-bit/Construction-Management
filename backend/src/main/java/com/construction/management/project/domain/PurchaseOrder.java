@@ -9,7 +9,7 @@ import java.time.LocalDateTime;
 
 @Entity
 @Table(name = "purchase_orders")
-public class PurchaseOrder {
+public class PurchaseOrder extends com.construction.management.auth.AuthoredEntity {
 
 	@Id
 	@Column(name = "po_id", nullable = false, length = 64)

@@ -7,7 +7,8 @@ import java.util.List;
 public record MeetingMinutesResponse(
 		@JsonProperty("meeting_id") String meetingId, @JsonProperty("project_id") String projectId, @JsonProperty("meeting_at") LocalDateTime meetingAt,
 		String location, String subject, @JsonProperty("agenda_content") String agendaContent, @JsonProperty("decision_content") String decisionContent,
-		String status, @JsonProperty("created_by") String createdBy, @JsonProperty("created_at") LocalDateTime createdAt,
+		String status, @JsonProperty("created_by") String createdBy,
+        @JsonProperty("created_user_id") String createdUserId, @JsonProperty("created_at") LocalDateTime createdAt,
 		@JsonProperty("updated_at") LocalDateTime updatedAt, @JsonProperty("open_action_item_count") long openActionItemCount,
 		List<Attendee> attendees, @JsonProperty("action_items") List<ActionItem> actionItems, List<Attachment> attachments
 ) {

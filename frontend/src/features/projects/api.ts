@@ -1,24 +1,24 @@
-import { apiUrl } from '../../lib/api-client'
+import { apiUrl, apiFetch } from '../../lib/api-client'
 import type { ProjectForm } from '../../types/domain'
 
 export const projectApi = {
   list(keyword = '') {
     const query = keyword.trim() ? `?keyword=${encodeURIComponent(keyword.trim())}` : ''
-    return fetch(apiUrl(`/api/v1/projects${query}`))
+    return apiFetch(apiUrl(`/api/v1/projects${query}`))
   },
   create(payload: Omit<ProjectForm, 'target_profit_rate'> & { target_profit_rate: number }) {
-    return fetch(apiUrl('/api/v1/projects'), { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) })
+    return apiFetch(apiUrl('/api/v1/projects'), { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) })
   },
   remove(projectId: string) {
-    return fetch(apiUrl(`/api/v1/projects/${projectId}`), { method: 'DELETE' })
+    return apiFetch(apiUrl(`/api/v1/projects/${projectId}`), { method: 'DELETE' })
   },
   startConstruction(projectId: string) {
-    return fetch(apiUrl(`/api/v1/projects/${projectId}/start-construction`), { method: 'POST' })
+    return apiFetch(apiUrl(`/api/v1/projects/${projectId}/start-construction`), { method: 'POST' })
   },
   synchronizePreparationStatus(projectId: string) {
-    return fetch(apiUrl(`/api/v1/projects/${projectId}/synchronize-preparation-status`), { method: 'POST' })
+    return apiFetch(apiUrl(`/api/v1/projects/${projectId}/synchronize-preparation-status`), { method: 'POST' })
   },
   integratedSummary(projectId: string, signal?: AbortSignal) {
-    return fetch(apiUrl(`/api/v1/projects/${projectId}/integrated-summary`), { signal })
+    return apiFetch(apiUrl(`/api/v1/projects/${projectId}/integrated-summary`), { signal })
   },
 }

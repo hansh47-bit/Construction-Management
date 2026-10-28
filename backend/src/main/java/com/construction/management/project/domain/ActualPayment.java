@@ -11,7 +11,7 @@ import java.time.LocalDateTime;
 
 @Entity
 @Table(name = "actual_payments")
-public class ActualPayment {
+public class ActualPayment extends com.construction.management.auth.AuthoredEntity {
 
 	@Id
 	@Column(name = "payment_id", nullable = false, length = 64)

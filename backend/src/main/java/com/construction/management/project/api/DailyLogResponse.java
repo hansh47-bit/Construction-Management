@@ -12,7 +12,8 @@ public record DailyLogResponse(
 		@JsonProperty("tomorrow_plan") String tomorrowPlan, @JsonProperty("safety_training_completed") boolean safetyTrainingCompleted,
 		@JsonProperty("safety_training_note") String safetyTrainingNote, @JsonProperty("complaint_note") String complaintNote,
 		@JsonProperty("design_change_issue_note") String designChangeIssueNote, @JsonProperty("other_note") String otherNote, String status,
-		@JsonProperty("created_by") String createdBy, @JsonProperty("created_at") LocalDateTime createdAt, @JsonProperty("updated_at") LocalDateTime updatedAt,
+		@JsonProperty("created_by") String createdBy,
+        @JsonProperty("created_user_id") String createdUserId, @JsonProperty("created_at") LocalDateTime createdAt, @JsonProperty("updated_at") LocalDateTime updatedAt,
 		@JsonProperty("labor_entries") List<LaborEntry> laborEntries, @JsonProperty("equipment_entries") List<EquipmentEntry> equipmentEntries,
 		@JsonProperty("material_entries") List<MaterialEntry> materialEntries, List<Photo> photos
 ) {

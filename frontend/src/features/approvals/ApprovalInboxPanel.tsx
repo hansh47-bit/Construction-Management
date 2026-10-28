@@ -1,3 +1,4 @@
+import { PermissionGate } from '../auth/Permissions'
 import { Download } from 'lucide-react'
 import { apiUrl } from '../../lib/api-client'
 import { formatDate, formatDateTime, formatWon } from '../../lib/format'
@@ -279,12 +280,12 @@ export function ApprovalInboxPanel({
                 <div className="border-t border-slate-200 pt-4">
                   <textarea value={rejectComment} onChange={(event) => setRejectComment(event.target.value)} placeholder="반려 사유" className="input min-h-24" />
                   <div className="mt-3 flex justify-end gap-2">
-                    <button type="button" onClick={() => rejectApproval(selectedApproval.approval_id)} disabled={!rejectComment.trim()} className="rounded-md border border-rose-300 px-3 py-2 text-sm font-semibold text-rose-700 hover:bg-rose-50 disabled:cursor-not-allowed disabled:opacity-40">
+                    <PermissionGate permission="APPROVAL_DECIDE"><button type="button" onClick={() => rejectApproval(selectedApproval.approval_id)} disabled={!rejectComment.trim()} className="rounded-md border border-rose-300 px-3 py-2 text-sm font-semibold text-rose-700 hover:bg-rose-50 disabled:cursor-not-allowed disabled:opacity-40">
                       반려
-                    </button>
-                    <button type="button" onClick={() => approveApproval(selectedApproval.approval_id)} className="rounded-md bg-cyan-700 px-3 py-2 text-sm font-semibold text-white hover:bg-cyan-800">
+                    </button></PermissionGate>
+                    <PermissionGate permission="APPROVAL_DECIDE"><button type="button" onClick={() => approveApproval(selectedApproval.approval_id)} className="rounded-md bg-cyan-700 px-3 py-2 text-sm font-semibold text-white hover:bg-cyan-800">
                       승인
-                    </button>
+                    </button></PermissionGate>
                   </div>
                 </div>
               )}
@@ -293,9 +294,9 @@ export function ApprovalInboxPanel({
                   <p className="mb-2 text-sm font-semibold text-amber-900">승인취소 후 재작업</p>
                   <textarea value={rejectComment} onChange={(event) => setRejectComment(event.target.value)} placeholder="승인취소 사유" className="input min-h-24" />
                   <div className="mt-3 flex justify-end">
-                    <button type="button" onClick={() => cancelApproval(selectedApproval.approval_id)} disabled={!rejectComment.trim()} className="rounded-md border border-amber-400 px-3 py-2 text-sm font-semibold text-amber-800 hover:bg-amber-50 disabled:cursor-not-allowed disabled:opacity-40">
+                    <PermissionGate permission="APPROVAL_DECIDE"><button type="button" onClick={() => cancelApproval(selectedApproval.approval_id)} disabled={!rejectComment.trim()} className="rounded-md border border-amber-400 px-3 py-2 text-sm font-semibold text-amber-800 hover:bg-amber-50 disabled:cursor-not-allowed disabled:opacity-40">
                       승인취소 후 재작업
-                    </button>
+                    </button></PermissionGate>
                   </div>
                 </div>
               )}

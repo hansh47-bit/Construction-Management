@@ -45,7 +45,10 @@ public record ApprovalResponse(
 		@JsonProperty("cancelled_at")
 		LocalDateTime cancelledAt,
 		Object detail,
-		List<Attachment> attachments
+		List<Attachment> attachments,
+        @JsonProperty("request_user_id") String requestUserId,
+        @JsonProperty("approver_user_id") String approverUserId,
+        @JsonProperty("cancelled_user_id") String cancelledUserId
 ) {
 	public static ApprovalResponse from(Approval approval, Project project) {
 		return from(approval, project, null);
@@ -67,7 +70,7 @@ public record ApprovalResponse(
 				approval.getRequestedAmount(),
 				approval.getPreviousAmount(),
 				approval.getVarianceAmount(),
-				approval.getRequestUser(),
+				approval.getCreatedUserId() == null ? "기존 기록 · " + approval.getRequestUser() : approval.getRequestUser(),
 				approval.getRequestReason(),
 				approval.getStatus().name(),
 				approval.getApprover(),
@@ -78,7 +81,8 @@ public record ApprovalResponse(
 				approval.getCancellationReason(),
 				approval.getCancelledAt(),
 			detail,
-			attachments == null ? List.of() : attachments
+			attachments == null ? List.of() : attachments,
+            approval.getCreatedUserId(), approval.getApproverUserId(), approval.getCancelledUserId()
 		);
 	}
 

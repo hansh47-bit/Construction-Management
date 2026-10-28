@@ -10,7 +10,7 @@ import java.time.LocalDateTime;
 
 @Entity
 @Table(name = "po_requisitions")
-public class PoRequisition {
+public class PoRequisition extends com.construction.management.auth.AuthoredEntity {
 
 	@Id
 	@Column(name = "requisition_id", nullable = false, length = 64)

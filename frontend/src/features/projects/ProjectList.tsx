@@ -1,3 +1,4 @@
+import { PermissionGate } from '../auth/Permissions'
 import { Search, Trash2 } from 'lucide-react'
 import type { Project } from '../../types/domain'
 import { formatDate } from '../../lib/format'
@@ -72,8 +73,8 @@ export function ProjectList({
                   <td className="px-4 py-3 text-slate-600">{formatDate(project.start_date)}</td>
                   <td className="px-4 py-3 text-slate-600">{formatDate(project.end_date)}</td>
                   <td className="px-4 py-3 text-slate-600">
-                    <p>{project.team_leader_id ?? '-'}</p>
-                    <p className="mt-1 text-xs text-slate-500">{project.manager_id ?? '-'}</p>
+                    <p>{project.team_leader_name ?? project.team_leader_id ?? '-'}</p>
+                    <p className="mt-1 text-xs text-slate-500">{project.manager_name ?? project.manager_id ?? '-'}</p>
                   </td>
                   <td className="px-4 py-3">
                     <span className="rounded-full bg-slate-100 px-2.5 py-1 text-xs font-semibold text-slate-700">
@@ -82,7 +83,7 @@ export function ProjectList({
                   </td>
                   <td className="px-4 py-3 text-slate-600">{project.note ?? '-'}</td>
                   <td className="px-4 py-3 text-center">
-                    <button
+                    <PermissionGate permission="PROJECT_DELETE"><button
                       type="button"
                       onClick={(event) => {
                         event.stopPropagation()
@@ -93,7 +94,7 @@ export function ProjectList({
                     >
                       <Trash2 className="h-3.5 w-3.5" aria-hidden="true" />
                       <span className="mt-0.5">삭제</span>
-                    </button>
+                    </button></PermissionGate>
                   </td>
                 </tr>
               ))

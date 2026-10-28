@@ -9,7 +9,7 @@ import java.time.LocalDateTime;
 
 @Entity
 @Table(name = "vendor_comparison_attachments")
-public class VendorComparisonAttachment {
+public class VendorComparisonAttachment extends com.construction.management.auth.AuthoredEntity {
 
 	@Id
 	@Column(name = "attachment_id", nullable = false, length = 64)

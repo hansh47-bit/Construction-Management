@@ -5,7 +5,7 @@ import java.time.LocalDate;
 import java.time.LocalDateTime;
 
 @Entity @Table(name = "meeting_action_items")
-public class MeetingActionItem {
+public class MeetingActionItem extends com.construction.management.auth.AuthoredEntity {
 	@Id @GeneratedValue(strategy = GenerationType.IDENTITY) private Long id;
 	@Column(name = "meeting_id", nullable = false, length = 64) private String meetingId;
 	@Column(name = "action_content", nullable = false, length = 4000) private String actionContent;

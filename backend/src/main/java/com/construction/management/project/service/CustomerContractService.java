@@ -32,7 +32,10 @@ import org.springframework.util.StringUtils;
 import org.springframework.web.multipart.MultipartFile;
 
 @Service
+@org.springframework.security.access.prepost.PreAuthorize("@businessPolicy.allow('PROJECT_READ')")
 public class CustomerContractService {
+	@org.springframework.beans.factory.annotation.Autowired private com.construction.management.auth.BusinessPolicy businessPolicy;
+
 
 	private final ProjectRepository projectRepository;
 	private final CustomerContractItemRepository itemRepository;
@@ -58,13 +61,17 @@ public class CustomerContractService {
 	}
 
 	@Transactional(readOnly = true)
+	@org.springframework.security.access.prepost.PreAuthorize("@businessPolicy.allow('CONTRACT_READ')")
 	public CustomerContractResponse getContract(String projectId) {
 		Project project = getProject(projectId);
 		return toResponse(project);
 	}
 
 	@Transactional
+	@org.springframework.security.access.prepost.PreAuthorize("@businessPolicy.allow('CONTRACT_WRITE')")
+	@com.construction.management.auth.BusinessAction
 	public CustomerContractResponse saveContract(String projectId, CustomerContractRequest request) {
+		businessPolicy.contractUnlocked(projectId); businessPolicy.draft("CONTRACT", projectId, null);
 		Project project = getProject(projectId);
 		project.updateTargetProfitRate(defaultZero(request.targetProfitRate()));
 
@@ -91,7 +98,10 @@ public class CustomerContractService {
 	}
 
 	@Transactional
+	@org.springframework.security.access.prepost.PreAuthorize("@businessPolicy.allow('CONTRACT_WRITE')")
+	@com.construction.management.auth.BusinessAction
 	public CustomerContractResponse uploadFile(String projectId, String fileType, MultipartFile file) {
+		businessPolicy.contractUnlocked(projectId); businessPolicy.draft("CONTRACT", projectId, null);
 		Project project = getProject(projectId);
 		if (file.isEmpty()) {
 			throw new IllegalArgumentException("업로드할 파일이 비어 있습니다.");
@@ -120,7 +130,10 @@ public class CustomerContractService {
 	}
 
 	@Transactional
+	@org.springframework.security.access.prepost.PreAuthorize("@businessPolicy.allow('CONTRACT_WRITE')")
+	@com.construction.management.auth.BusinessAction
 	public CustomerContractResponse deleteFile(String projectId, String fileId) {
+		businessPolicy.contractUnlocked(projectId); businessPolicy.draft("CONTRACT", projectId, null);
 		Project project = getProject(projectId);
 		ContractFile file = getFile(projectId, fileId);
 		Path projectDirectory = uploadRoot.resolve(projectId).normalize();
@@ -142,6 +155,7 @@ public class CustomerContractService {
 	}
 
 	@Transactional
+	@org.springframework.security.access.prepost.PreAuthorize("@businessPolicy.allow('PROJECT_DELETE')")
 	public void deleteFilesForProject(String projectId) {
 		Path projectDirectory = uploadRoot.resolve(projectId).normalize();
 		List<ContractFile> files = fileRepository.findByProjectIdOrderByUploadedAtDesc(projectId);
@@ -160,6 +174,7 @@ public class CustomerContractService {
 	}
 
 	@Transactional(readOnly = true)
+	@org.springframework.security.access.prepost.PreAuthorize("@businessPolicy.allow('CONTRACT_READ')")
 	public ContractFile getFile(String projectId, String fileId) {
 		ContractFile file = fileRepository.findById(fileId)
 				.orElseThrow(() -> new EntityNotFoundException("파일을 찾을 수 없습니다: " + fileId));
@@ -169,6 +184,7 @@ public class CustomerContractService {
 		return file;
 	}
 
+	@org.springframework.security.access.prepost.PreAuthorize("@businessPolicy.allow('CONTRACT_READ')")
 	public Resource loadFileResource(ContractFile file) {
 		try {
 			Resource resource = new UrlResource(Path.of(file.getFilePath()).toUri());

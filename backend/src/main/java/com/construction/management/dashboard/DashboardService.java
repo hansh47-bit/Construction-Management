@@ -16,6 +16,7 @@ import org.springframework.stereotype.Service;
 
 /** Executive dashboard values are calculated from the same project summaries shown in Project Single View. */
 @Service
+@org.springframework.security.access.prepost.PreAuthorize("@businessPolicy.allow('DASHBOARD_READ')")
 public class DashboardService {
 	private final ProjectRepository projectRepository;
 	private final ApprovalRepository approvalRepository;

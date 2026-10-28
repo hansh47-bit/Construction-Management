@@ -4,7 +4,7 @@ import jakarta.persistence.*;
 import java.time.LocalDateTime;
 
 @Entity @Table(name = "meeting_minutes")
-public class MeetingMinutes {
+public class MeetingMinutes extends com.construction.management.auth.AuthoredEntity {
 	@Id @Column(name = "meeting_id", nullable = false, length = 64) private String meetingId;
 	@Column(name = "project_id", nullable = false, length = 64) private String projectId;
 	@Column(name = "meeting_at", nullable = false) private LocalDateTime meetingAt;

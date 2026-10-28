@@ -54,7 +54,10 @@ import org.springframework.transaction.annotation.Transactional;
 import org.springframework.util.StringUtils;
 
 @Service
+@org.springframework.security.access.prepost.PreAuthorize("@businessPolicy.allow('PROJECT_READ')")
 public class ProjectSettlementService {
+	@org.springframework.beans.factory.annotation.Autowired private com.construction.management.auth.BusinessPolicy businessPolicy;
+
 	private final ProjectRepository projectRepository;
 	private final ProjectRevisionRepository revisionRepository;
 	private final ProjectContractRepository projectContractRepository;
@@ -109,6 +112,7 @@ public class ProjectSettlementService {
 	}
 
 	@Transactional(readOnly = true)
+	@org.springframework.security.access.prepost.PreAuthorize("@businessPolicy.allow('SETTLEMENT_READ')")
 	public ProjectSettlementResponse getSettlement(String projectId) {
 		Project project = getProject(projectId);
 		ProjectRevision revision = currentRevision(projectId);
@@ -129,6 +133,8 @@ public class ProjectSettlementService {
 	}
 
 	@Transactional
+	@org.springframework.security.access.prepost.PreAuthorize("@businessPolicy.allow('SETTLEMENT_REQUEST')")
+	@com.construction.management.auth.BusinessAction
 	public ProjectSettlementResponse requestSettlementApproval(String projectId, ProjectSettlementCompleteRequest request) {
 		Project project = getProject(projectId);
 		ProjectRevision revision = currentRevision(projectId);
@@ -177,7 +183,7 @@ public class ProjectSettlementService {
 		approvalRepository.save(new Approval(
 				nextSettlementApprovalId(), projectId, "FINAL_SETTLEMENT", settlement.getSettlementId(), "준공정산 최종 승인 요청",
 				snapshot.finalCost(), snapshot.finalContractAmount(), snapshot.finalProfit(),
-				StringUtils.hasText(request.settledBy()) ? request.settledBy() : "system", request.settlementNotes()
+				com.construction.management.auth.CurrentActor.name(), request.settlementNotes()
 		));
 		project.changeStatus(ProjectStatus.정산중);
 		projectRepository.save(project);
@@ -187,6 +193,7 @@ public class ProjectSettlementService {
 	}
 
 	@Transactional
+	@org.springframework.security.access.prepost.PreAuthorize("@businessPolicy.allow('APPROVAL_DECIDE')")
 	public void approveRequestedSettlement(String projectId, String settlementId, String approver) {
 		ProjectSettlement settlement = settlementRepository.findById(settlementId)
 				.orElseThrow(() -> new EntityNotFoundException("준공정산 요청을 찾을 수 없습니다: " + settlementId));
@@ -201,6 +208,7 @@ public class ProjectSettlementService {
 	}
 
 	@Transactional
+	@org.springframework.security.access.prepost.PreAuthorize("@businessPolicy.allow('APPROVAL_DECIDE')")
 	public void rejectRequestedSettlement(String projectId, String settlementId) {
 		ProjectSettlement settlement = settlementRepository.findById(settlementId)
 				.orElseThrow(() -> new EntityNotFoundException("준공정산 요청을 찾을 수 없습니다: " + settlementId));

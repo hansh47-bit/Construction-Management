@@ -28,7 +28,10 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 @Service
+@org.springframework.security.access.prepost.PreAuthorize("@businessPolicy.allow('PROJECT_READ')")
 public class PurchaseOrderService {
+	@org.springframework.beans.factory.annotation.Autowired private com.construction.management.auth.BusinessPolicy businessPolicy;
+
 	private final ProjectRepository projectRepository;
 	private final ProjectRevisionRepository revisionRepository;
 	private final PurchaseOrderRepository purchaseOrderRepository;
@@ -50,6 +53,7 @@ public class PurchaseOrderService {
 	}
 
 	@Transactional(readOnly = true)
+	@org.springframework.security.access.prepost.PreAuthorize("@businessPolicy.allow('PROCUREMENT_READ')")
 	public PurchaseOrderResponse getPurchaseOrders(String projectId) {
 		Project project = projectRepository.findById(projectId)
 				.orElseThrow(() -> new EntityNotFoundException("프로젝트를 찾을 수 없습니다: " + projectId));

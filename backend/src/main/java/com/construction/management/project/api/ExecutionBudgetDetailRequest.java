@@ -6,12 +6,14 @@ import jakarta.validation.constraints.NotNull;
 import java.math.BigDecimal;
 import java.util.List;
 
+@com.fasterxml.jackson.annotation.JsonIgnoreProperties(ignoreUnknown=true)
 public record ExecutionBudgetDetailRequest(
 		@Valid
 		@NotNull
 		List<Detail> details
 ) {
-	public record Detail(
+	@com.fasterxml.jackson.annotation.JsonIgnoreProperties(ignoreUnknown=true)
+public record Detail(
 			@JsonProperty("budget_item_id")
 			String budgetItemId,
 			@JsonProperty("category_name")

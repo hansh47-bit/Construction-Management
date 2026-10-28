@@ -21,7 +21,8 @@ public record ProjectRevisionResponse(
 		@JsonProperty("base_contract_items") List<ContractItem> baseContractItems,
 		@JsonProperty("contract_items") List<ContractItem> contractItems,
 		@JsonProperty("base_budget_details") List<BudgetDetail> baseBudgetDetails,
-		@JsonProperty("budget_details") List<BudgetDetail> budgetDetails
+		@JsonProperty("budget_details") List<BudgetDetail> budgetDetails,
+        @JsonProperty("created_user_id") String createdUserId
 ) {
 	public record ContractItem(
 			@JsonProperty("work_category") String workCategory,
