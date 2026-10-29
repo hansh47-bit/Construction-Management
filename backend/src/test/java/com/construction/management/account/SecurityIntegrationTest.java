@@ -156,7 +156,7 @@ class SecurityIntegrationTest {
 
  @Test void lockedAndUnknownPermissionsAndInvalidDependenciesAreRejected() throws Exception {
   MockHttpSession session=login(admin());
-  for(String key:List.of("APPROVAL_DECIDE","PAYMENT_EXECUTE","EXECUTIVE_CORRECT","UNKNOWN_KEY")) mvc.perform(put("/api/v1/admin/positions/STAFF/permissions").session(session).with(csrf()).contentType(MediaType.APPLICATION_JSON).content(json.writeValueAsString(Map.of("permissions",Map.of(key,true),"versions",Map.of(key,0),"reason","통제 우회 시도")))).andExpect(status().isBadRequest());
+  for(String key:List.of("APPROVAL_DECIDE","APPROVAL_REVIEW","PAYMENT_REQUEST","PAYMENT_EXECUTE","EXECUTIVE_CORRECT","UNKNOWN_KEY")) mvc.perform(put("/api/v1/admin/positions/STAFF/permissions").session(session).with(csrf()).contentType(MediaType.APPLICATION_JSON).content(json.writeValueAsString(Map.of("permissions",Map.of(key,true),"versions",Map.of(key,0),"reason","통제 우회 시도")))).andExpect(status().isBadRequest());
   long version=permissions.findById("STAFF:SITE_READ").orElseThrow().version;
   mvc.perform(put("/api/v1/admin/positions/STAFF/permissions").session(session).with(csrf()).contentType(MediaType.APPLICATION_JSON).content(json.writeValueAsString(Map.of("permissions",Map.of("SITE_READ",false),"versions",Map.of("SITE_READ",version),"reason","의존성 위반")))).andExpect(status().isBadRequest());
  }
@@ -182,7 +182,8 @@ class SecurityIntegrationTest {
   mvc.perform(post("/api/v1/approvals/"+a.getApprovalId()+"/approve").session(employee).with(csrf()).contentType(MediaType.APPLICATION_JSON).content("{\"approver\":\"대표\"}" )).andExpect(status().isForbidden());
   mvc.perform(post("/api/v1/approvals/"+a.getApprovalId()+"/approve").session(login(ceo)).with(csrf()).contentType(MediaType.APPLICATION_JSON).content("{\"approver\":\"위조 이름\"}" )).andExpect(status().isOk()).andExpect(jsonPath("approver").value(ceo.name)).andExpect(jsonPath("approver_user_id").value(ceo.getId()));
   assertThat(payments.findByClaimId(claim.getClaimId())).isEmpty();
-  mvc.perform(post("/api/v1/projects/"+p.getProjectId()+"/payment-requests").session(employee).with(csrf()).contentType(MediaType.APPLICATION_JSON).content(json.writeValueAsString(Map.of("po_ids",List.of(po.getPoId()))))).andExpect(status().isCreated());
+  mvc.perform(post("/api/v1/projects/"+p.getProjectId()+"/payment-requests").session(employee).with(csrf()).contentType(MediaType.APPLICATION_JSON).content(json.writeValueAsString(Map.of("po_ids",List.of(po.getPoId()))))).andExpect(status().isForbidden());
+  mvc.perform(post("/api/v1/projects/"+p.getProjectId()+"/payment-requests").session(login(finance)).with(csrf()).contentType(MediaType.APPLICATION_JSON).content(json.writeValueAsString(Map.of("po_ids",List.of(po.getPoId()))))).andExpect(status().isCreated());
   Approval paymentApproval=approvals.findByProjectIdOrderByRequestedAtDesc(p.getProjectId()).stream().filter(v -> "PAYMENT".equals(v.getApprovalType())).findFirst().orElseThrow();
   mvc.perform(post("/api/v1/approvals/"+paymentApproval.getApprovalId()+"/approve").session(login(ceo)).with(csrf())).andExpect(status().isOk());
   assertThat(payments.findByClaimId(claim.getClaimId())).isEmpty();

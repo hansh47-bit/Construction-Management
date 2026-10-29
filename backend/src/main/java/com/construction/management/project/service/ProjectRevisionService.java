@@ -218,7 +218,7 @@ public class ProjectRevisionService {
 			throw new IllegalStateException("이미 결재 대기 중인 변경 차수입니다.");
 		}
 		ProjectRevisionResponse detail = response(revision);
-		Approval approval = approvalRepository.save(new Approval(
+		Approval approval = new Approval(
 				"APR-REV-" + UUID.randomUUID().toString().substring(0, 8).toUpperCase(),
 				projectId,
 				ApprovalService.TYPE_PROJECT_REVISION,
@@ -229,7 +229,9 @@ public class ProjectRevisionService {
 				detail.contractTotal().subtract(detail.baseContractTotal()),
 				com.construction.management.auth.CurrentActor.name(),
 				request != null && StringUtils.hasText(request.requestReason()) ? request.requestReason() : revision.getReason()
-		));
+		);
+		businessPolicy.prepareApproval(approval);
+		approvalRepository.save(approval);
 		revision.markApprovalRequested();
 		revisionRepository.save(revision);
 		return ApprovalResponse.from(approval, project(projectId));
@@ -333,7 +335,7 @@ public class ProjectRevisionService {
 	}
 
 	@Transactional
-	@org.springframework.security.access.prepost.PreAuthorize("@businessPolicy.allow('APPROVAL_DECIDE')")
+	@org.springframework.security.access.prepost.PreAuthorize("@businessPolicy.allow('APPROVAL_DECIDE') or @businessPolicy.allow('APPROVAL_REVIEW')")
 	public void rejectRevision(String projectId, String revisionId) {
 		ProjectRevision revision = revision(projectId, revisionId);
 		if (!"REQUESTED".equals(revision.getStatus())) throw new IllegalStateException("결재 대기 중인 변경 차수만 반려할 수 있습니다.");

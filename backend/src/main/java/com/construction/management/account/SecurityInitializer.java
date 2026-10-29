@@ -10,6 +10,11 @@ public class SecurityInitializer implements CommandLineRunner {
  public SecurityInitializer(PermissionService permissions,AdminBootstrap bootstrap,Environment env,ConfigurableApplicationContext context) { this.permissions=permissions; this.bootstrap=bootstrap; this.env=env; this.context=context; }
  public void run(String... args) {
   permissions.initializeDefaults();
-  if(env.getProperty("app.bootstrap-admin",Boolean.class,false)) { bootstrap.create(env.getProperty("app.bootstrap.login"),env.getProperty("app.bootstrap.name"),env.getProperty("app.bootstrap.password")); context.close(); }
- }
+  if(env.getProperty("app.bootstrap-admin",Boolean.class,false)) {
+   String login=env.getProperty("app.bootstrap.login"), name=env.getProperty("app.bootstrap.name"), password=env.getProperty("app.bootstrap.password");
+   if(env.getProperty("app.bootstrap-reset-accounts",Boolean.class,false)) bootstrap.resetAndCreate(login,name,password);
+   else bootstrap.create(login,name,password);
+   context.close();
+  }
+}
 }

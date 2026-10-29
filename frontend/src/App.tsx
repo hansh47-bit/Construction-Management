@@ -2,9 +2,15 @@ import { UserMenu } from './features/auth/AuthProvider'
 import { useAuth } from './features/auth/auth'
 import { DraftPermissions, WriteScope } from './features/auth/Permissions'
 import { apiJson } from './lib/api-client'
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { confirmAction, hasUnsavedDraft, notify, userAction } from './lib/feedback'
+import { useDraftGuard, useLiveRefresh } from './lib/use-live-refresh'
+import { useWorkspaceState, useWorkspaceUpdate } from './lib/use-workspace-state'
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import type { ApprovalItem, CustomerContract, CustomerContractItem, ExecutionBudgetDetail, ExecutionBudgetDetailResponse, ExecutionBudgetSummaryItem, IntegratedSummary, ProgressPaymentResponse, ProjectSettlement, PurchaseOrderDraft, PurchaseOrderHistoryItem, PurchaseOrderHistoryResponse, VendorComparisonItem, VendorComparisonResponse } from './types/domain'
 import { approvalApi } from './features/approvals/api'
+import { canDecideApproval } from './features/approvals/workflow'
+import { approvalProjectOptions, matchesApproval } from './features/approvals/project-filter'
+import type { ApprovalProject } from './features/approvals/project-filter'
 import { contractApi } from './features/contracts/api'
 import { executionBudgetApi } from './features/execution-budget/api'
 import { paymentApi } from './features/payments/api'
@@ -22,6 +28,7 @@ import { ExecutiveDashboard } from './features/dashboard/ExecutiveDashboard'
 import { ContractManagementPanel } from './features/contracts/ContractManagementPanel'
 import { ExecutionBudgetDetailPanel } from './features/execution-budget/ExecutionBudgetDetailPanel'
 import { ProgressPaymentPanel } from './features/payments/ProgressPaymentPanel'
+import { claimEntryDefaults } from './features/payments/progress-claim'
 import { PurchaseOrderHistoryPanel } from './features/procurement/PurchaseOrderHistoryPanel'
 import { VendorComparisonPanel } from './features/procurement/VendorComparisonPanel'
 import { SettlementPanel } from './features/settlement/SettlementPanel'
@@ -79,17 +86,20 @@ function newVendorComparison(itemId = 'EX-001', suffix = 'A'): VendorComparisonI
 }
 
 function App() {
-  const { can, notice } = useAuth()
+  const { user, can, notice } = useAuth()
+  const updateView = useWorkspaceUpdate()
+  const availablePages = (['projects', 'executive', 'approvals', 'changes'] as const).filter(page => can(page === 'executive' ? 'DASHBOARD_READ' : page === 'approvals' ? 'APPROVAL_READ' : page === 'changes' ? 'CHANGE_READ' : 'PROJECT_READ'))
+  const availableTabs = projectTabs.filter(tab => can(tab === '고객 견적·계약 관리' ? 'CONTRACT_READ' : tab === '세부실행예산' ? 'BUDGET_READ' : ['업체 비교견적', '계약/발주 이력'].includes(tab) ? 'PROCUREMENT_READ' : tab === '기성 및 지급 현황' ? 'PROGRESS_READ' : tab === '준공정산' ? 'SETTLEMENT_READ' : 'SITE_READ'))
   const [draftAccessResult, setDraftAccessResult] = useState<{ projectId: string; itemId: string; values: Record<string, boolean> } | null>(null)
-  const [activePage, setActivePage] = useState<'projects' | 'executive' | 'approvals' | 'changes'>('projects')
-  const [selectedProjectId, setSelectedProjectId] = useState<string | null>(null)
+  const [activePage, setActivePage] = useWorkspaceState<'projects' | 'executive' | 'approvals' | 'changes'>('page', availablePages[0] ?? 'projects', availablePages)
+  const [selectedProjectId, setSelectedProjectId] = useWorkspaceState<string | null>('project', null)
   const [summary, setSummary] = useState<IntegratedSummary | null>(null)
   const [contract, setContract] = useState<CustomerContract | null>(null)
   const [contractItems, setContractItems] = useState<CustomerContractItem[]>([])
   const [executionBudget, setExecutionBudget] = useState<ExecutionBudgetDetailResponse | null>(null)
   const [executionDetails, setExecutionDetails] = useState<ExecutionBudgetDetail[]>([])
   const [executionBudgetApprovalFiles, setExecutionBudgetApprovalFiles] = useState<File[]>([])
-  const [selectedExecutionItemId, setSelectedExecutionItemId] = useState('EX-001')
+  const [selectedExecutionItemId, setSelectedExecutionItemId] = useWorkspaceState<string>('item', 'EX-001')
   const draftAccess = draftAccessResult?.projectId === selectedProjectId && draftAccessResult.itemId === selectedExecutionItemId ? draftAccessResult.values : { CONTRACT_WRITE: false, BUDGET_WRITE: false, PROCUREMENT_WRITE: false }
   const [revisionProcurementItemIds, setRevisionProcurementItemIds] = useState<string[] | null>(null)
   const [vendorComparison, setVendorComparison] = useState<VendorComparisonResponse | null>(null)
@@ -98,29 +108,80 @@ function App() {
   const [purchaseOrderHistory, setPurchaseOrderHistory] = useState<PurchaseOrderHistoryItem[]>([])
   const [purchaseOrderHistoryRevision, setPurchaseOrderHistoryRevision] = useState<number | undefined>()
   const [approvals, setApprovals] = useState<ApprovalItem[]>([])
+  const [approvalProjects, setApprovalProjects] = useState<ApprovalProject[]>([])
   const [pendingApprovalCount, setPendingApprovalCount] = useState(0)
   const [selectedApproval, setSelectedApproval] = useState<ApprovalItem | null>(null)
-  const [approvalStatusFilter, setApprovalStatusFilter] = useState('REQUESTED')
-  const [approvalTypeFilter, setApprovalTypeFilter] = useState('')
+  const [selectedApprovalId, setSelectedApprovalId] = useWorkspaceState<string>('approval', '', undefined, true)
+  const [approvalProjectFilter] = useWorkspaceState<string>('approvalProject', '')
+  const [approvalStatusFilter, setApprovalStatusFilter] = useWorkspaceState<string>('approvalStatus', 'REQUESTED', ['', 'REQUESTED', 'APPROVED', 'REJECTED', 'CANCELLED'])
+  const [approvalTypeFilter, setApprovalTypeFilter] = useWorkspaceState<string>('approvalType', '')
   const [rejectComment, setRejectComment] = useState('')
   const [progressPayment, setProgressPayment] = useState<ProgressPaymentResponse | null>(null)
   const [settlement, setSettlement] = useState<ProjectSettlement | null>(null)
-  const [selectedPoId, setSelectedPoId] = useState('')
-  const [claimForm, setClaimForm] = useState({ degree: '1', claim_amount: '0' })
+  const [selectedPoId, setSelectedPoId] = useWorkspaceState<string>('po', '')
+  const [claimDraft, setClaimDraft] = useState<{ projectId: string; poId: string; amount: string } | null>(null)
+  const selectedClaimPo = progressPayment?.project_id === selectedProjectId
+    ? progressPayment.purchaseOrders.find(po => po.po_id === selectedPoId) ?? progressPayment.purchaseOrders[0]
+    : undefined
+  const claimDefaults = claimEntryDefaults(selectedClaimPo)
+  const currentClaimDraft = claimDraft?.projectId === selectedProjectId && claimDraft?.poId === selectedClaimPo?.po_id ? claimDraft : null
+  const claimForm = { ...claimDefaults, claim_amount: currentClaimDraft?.amount ?? claimDefaults.claim_amount }
+  const claimEdited = !!currentClaimDraft && toNumber(currentClaimDraft.amount) !== toNumber(claimDefaults.claim_amount)
   const [selectedPaymentPoIds, setSelectedPaymentPoIds] = useState<string[]>([])
   const [settlementForm, setSettlementForm] = useState({ uncollected_receivable: '0', settlement_site_expense: '0', settlement_labor_expense: '0', settlement_tax: '0', settlement_notes: '', force_complete_if_unpaid: false, unpaid_handling_reason: '' })
   const [targetProfitRate, setTargetProfitRate] = useState('0')
   const [selectedFileType, setSelectedFileType] = useState('CONTRACT')
-  const [activeTab, setActiveTab] = useState(tabs[0])
+  const [activeTab, setActiveTab] = useWorkspaceState<string>('tab', availableTabs[0] ?? tabs[0], availableTabs)
   const [error, setError] = useState<string | null>(null)
   const [isLoading, setIsLoading] = useState(false)
   const tabRef = useRef<HTMLDivElement | null>(null)
+  const scope = useRef({ projectId: selectedProjectId, itemId: selectedExecutionItemId, poId: selectedPoId, approvalId: selectedApprovalId, approvalProjectId: approvalProjectFilter, page: activePage, status: approvalStatusFilter, type: approvalTypeFilter })
+  useLayoutEffect(() => { scope.current = { projectId: selectedProjectId, itemId: selectedExecutionItemId, poId: selectedPoId, approvalId: selectedApprovalId, approvalProjectId: approvalProjectFilter, page: activePage, status: approvalStatusFilter, type: approvalTypeFilter } })
+  const reads = useRef<Record<string, number>>({})
+  const loadApprovalProjects = useCallback(async () => {
+    if (!can('PROJECT_READ')) return
+    const sequence = reads.current.approvalProjects = (reads.current.approvalProjects ?? 0) + 1
+    try {
+      const response = await projectApi.list('')
+      if (!response.ok) return
+      const data: ApprovalProject[] = await response.json()
+      if (reads.current.approvalProjects === sequence) setApprovalProjects(data)
+    } catch { /* Existing options and approval labels remain usable during a read failure. */ }
+  }, [can])
+  const statusApprovals = useMemo(() => approvals.filter(approval => matchesApproval(approval, { status: approvalStatusFilter, type: approvalTypeFilter })), [approvals, approvalStatusFilter, approvalTypeFilter])
+  const visibleApprovals = useMemo(() => statusApprovals.filter(approval => matchesApproval(approval, { projectId: approvalProjectFilter })), [statusApprovals, approvalProjectFilter])
+  const approvalProjectChoices = useMemo(() => approvalProjectOptions(approvalProjects, statusApprovals, approvalProjectFilter), [approvalProjects, statusApprovals, approvalProjectFilter])
+  const [baselines, setBaselines] = useState({ contract: '', budget: '', vendor: '', settlement: '' })
+  const fingerprints = {
+    contract: JSON.stringify({ items: contractItems, rate: targetProfitRate }),
+    budget: JSON.stringify(executionDetails),
+    vendor: JSON.stringify(vendorComparisons),
+    settlement: JSON.stringify(settlementForm),
+  }
+  const dirty = {
+    contract: !!baselines.contract && fingerprints.contract !== baselines.contract,
+    budget: !!baselines.budget && fingerprints.budget !== baselines.budget,
+    vendor: !!baselines.vendor && fingerprints.vendor !== baselines.vendor,
+    settlement: !!baselines.settlement && fingerprints.settlement !== baselines.settlement,
+  }
+  const editor = useRef({ dirty, fingerprints, settlementForm })
+  useLayoutEffect(() => { editor.current = { dirty, fingerprints, settlementForm } })
+  useDraftGuard(Object.values(dirty).some(Boolean) || executionBudgetApprovalFiles.length > 0 || claimEdited || !!rejectComment.trim())
   const { projects, keyword, setKeyword, isModalOpen, setIsModalOpen, form, setForm, refreshProjects, submitProject, deleteProject } = useProjects({
     onError: setError,
     onDeleted: (projectId) => { if (selectedProjectId === projectId) setSelectedProjectId(null) },
   })
 
   useEffect(() => {
+    setBaselines({ contract: '', budget: '', vendor: '', settlement: '' })
+    setClaimDraft(null)
+    setIsLoading(false)
+    setSummary(null)
+    setContract(null)
+    setExecutionBudget(null)
+    setVendorComparison(null)
+    setProgressPayment(null)
+    setSettlement(null)
     if (!selectedProjectId) {
       setSummary(null)
       setContract(null)
@@ -145,13 +206,22 @@ function App() {
 
     const controller = new AbortController()
     async function loadSummary() {
+      const sequence = reads.current.summary = (reads.current.summary ?? 0) + 1
       try {
         setIsLoading(true)
         const response = await projectApi.integratedSummary(selectedProjectId!, controller.signal)
+        if (controller.signal.aborted || scope.current.projectId !== selectedProjectId || reads.current.summary !== sequence) return
         if (!response.ok) {
+          if (response.status === 403 || response.status === 404) {
+            updateView({ project: null, item: null, po: null }, true)
+            notify('해당 현장이 삭제되었거나 조회 권한이 없어 프로젝트 목록으로 이동했습니다.', 'info')
+            return
+          }
           throw new Error(`통합현황 조회 실패: ${response.status}`)
         }
-        setSummary(await response.json())
+        const loaded: IntegratedSummary = await response.json()
+        if (controller.signal.aborted || scope.current.projectId !== selectedProjectId || reads.current.summary !== sequence) return
+        setSummary(loaded)
         setError(null)
       } catch (err) {
         if (err instanceof DOMException && err.name === 'AbortError') {
@@ -159,7 +229,7 @@ function App() {
         }
         setError(err instanceof Error ? err.message : '통합현황을 불러오지 못했습니다.')
       } finally {
-        setIsLoading(false)
+        if (!controller.signal.aborted && scope.current.projectId === selectedProjectId) setIsLoading(false)
       }
     }
 
@@ -198,6 +268,12 @@ function App() {
   }, [])
 
   useEffect(() => {
+    // This starts an asynchronous catalog read; state is updated only after the response.
+    // eslint-disable-next-line react/set-state-in-effect
+    if (activePage === 'approvals') void loadApprovalProjects()
+  }, [activePage, loadApprovalProjects])
+
+  useEffect(() => {
     if (!selectedProjectId) return
     let live = true
     void apiJson<Record<string, boolean>>(`/api/v1/projects/${selectedProjectId}/access?itemId=${encodeURIComponent(selectedExecutionItemId)}`).then(value => { if (live) setDraftAccessResult({ projectId: selectedProjectId, itemId: selectedExecutionItemId, values: value }) }).catch(() => {})
@@ -205,14 +281,42 @@ function App() {
   }, [selectedProjectId, selectedExecutionItemId])
 
   const selectedProject = useMemo(
-    () => projects.find((project) => project.project_id === selectedProjectId) ?? summary?.project_info,
+    () => projects.find((project) => project.project_id === selectedProjectId) ?? (summary?.project_info.project_id === selectedProjectId ? summary.project_info : undefined),
     [projects, selectedProjectId, summary],
   )
+
+  useLiveRefresh(async () => {
+    const projectId = scope.current.projectId
+    const tasks: Promise<unknown>[] = [refreshProjects(keyword), loadApprovals()]
+    if (scope.current.page === 'approvals') tasks.push(loadApprovalProjects())
+    if (projectId) {
+      tasks.push(loadCustomerContract(projectId, true), loadExecutionBudgetDetails(projectId, true), loadProgressPayments(projectId), loadPurchaseOrders(projectId), loadSettlement(projectId, true))
+      if (scope.current.itemId) tasks.push(loadVendorComparisons(projectId, scope.current.itemId, true))
+      tasks.push(refreshSummary(projectId))
+      const itemId = scope.current.itemId
+      tasks.push(apiJson<Record<string, boolean>>(`/api/v1/projects/${projectId}/access?itemId=${encodeURIComponent(itemId)}`).then(values => {
+        if (scope.current.projectId === projectId && scope.current.itemId === itemId) setDraftAccessResult({ projectId, itemId, values })
+      }))
+    }
+    await Promise.allSettled(tasks)
+  })
+
+  useEffect(() => {
+    if (selectedApprovalId && can('APPROVAL_READ')) void loadApprovalDetail(selectedApprovalId)
+  }, [selectedApprovalId])
+
+  async function refreshSummary(projectId: string) {
+    const sequence = reads.current.summary = (reads.current.summary ?? 0) + 1
+    const response = await projectApi.integratedSummary(projectId)
+    if (!response.ok) return
+    const latest: IntegratedSummary = await response.json()
+    if (scope.current.projectId === projectId && reads.current.summary === sequence) setSummary(latest)
+  }
 
   async function startConstruction() {
     if (!can('PROJECT_STATUS')) return
     if (!selectedProjectId || !selectedProject) return
-    if (!window.confirm(`“${selectedProject.project_name}” 프로젝트의 공사를 시작하시겠습니까? 상태가 공사진행으로 변경됩니다.`)) {
+    if (!await confirmAction({ title: '공사 시작 확인', message: `“${selectedProject.project_name}” 프로젝트의 공사를 시작하시겠습니까? 상태가 공사진행으로 변경됩니다.`, confirmLabel: '공사 시작' })) {
       return
     }
 
@@ -225,15 +329,14 @@ function App() {
 
     await response.json()
     await refreshProjects(keyword)
-    const summaryResponse = await projectApi.integratedSummary(selectedProjectId)
-    if (summaryResponse.ok) setSummary(await summaryResponse.json())
+    await refreshSummary(selectedProjectId)
     setError(null)
   }
 
   async function synchronizePreparationStatus() {
     if (!can('PROJECT_STATUS')) return
     if (!selectedProjectId || !selectedProject) return
-    if (!window.confirm(`“${selectedProject.project_name}” 프로젝트의 승인된 실행예산을 반영해 상태를 공사준비로 변경하시겠습니까?`)) {
+    if (!await confirmAction({ title: '프로젝트 상태 변경 확인', message: `“${selectedProject.project_name}” 프로젝트의 승인된 실행예산을 반영해 상태를 공사준비로 변경하시겠습니까?`, confirmLabel: '상태 변경' })) {
       return
     }
 
@@ -246,25 +349,31 @@ function App() {
 
     await response.json()
     await refreshProjects(keyword)
-    const summaryResponse = await projectApi.integratedSummary(selectedProjectId)
-    if (summaryResponse.ok) setSummary(await summaryResponse.json())
+    await refreshSummary(selectedProjectId)
     setError(null)
   }
 
-  async function loadCustomerContract(projectId: string) {
+  async function loadCustomerContract(projectId: string, preserveDraft = false) {
     if (!can('CONTRACT_READ')) return
+    const sequence = reads.current.contract = (reads.current.contract ?? 0) + 1
     try {
       const response = await contractApi.get(projectId)
       if (!response.ok) {
         throw new Error(`고객 계약 조회 실패: ${response.status}`)
       }
       const data: CustomerContract = await response.json()
+      if (scope.current.projectId !== projectId || reads.current.contract !== sequence) return
       setContract(data)
-      setTargetProfitRate(String(data.target_profit_rate ?? 0))
-      setContractItems(data.items.length > 0 ? data.items : [newContractItem()])
-      setError(null)
+      if (!preserveDraft || !editor.current.dirty.contract) {
+        const items = data.items.length > 0 ? data.items : [newContractItem()]
+        const rate = String(data.target_profit_rate ?? 0)
+        setBaselines(current => ({ ...current, contract: JSON.stringify({ items, rate }) }))
+        setTargetProfitRate(rate)
+        setContractItems(items)
+      }
+      if (!preserveDraft) setError(null)
     } catch (err) {
-      setError(err instanceof Error ? err.message : '고객 계약 정보를 불러오지 못했습니다.')
+      if (!preserveDraft && scope.current.projectId === projectId) setError(err instanceof Error ? err.message : '고객 계약 정보를 불러오지 못했습니다.')
     }
   }
 
@@ -301,16 +410,14 @@ function App() {
     }
 
     const data: CustomerContract = await response.json()
+    setBaselines(current => ({ ...current, contract: JSON.stringify({ items: data.items.length > 0 ? data.items : [newContractItem()], rate: String(data.target_profit_rate ?? 0) }) }))
     setContract(data)
     setContractItems(data.items.length > 0 ? data.items : [newContractItem()])
     setTargetProfitRate(String(data.target_profit_rate ?? 0))
     await refreshProjects(keyword)
     if (selectedProjectId) {
-      const summaryResponse = await projectApi.integratedSummary(selectedProjectId)
-      if (summaryResponse.ok) {
-        setSummary(await summaryResponse.json())
-      }
-      await loadSettlement(selectedProjectId)
+      await refreshSummary(selectedProjectId)
+      await loadSettlement(selectedProjectId, true)
     }
     return true
   }
@@ -342,6 +449,8 @@ function App() {
       return
     }
 
+    if (!await confirmAction({ title: '계약 첨부파일 삭제', message: '선택한 계약 첨부파일을 삭제하시겠습니까?', confirmLabel: '삭제', destructive: true })) return
+
     const response = await contractApi.deleteFile(selectedProjectId, fileId)
 
     if (!response.ok) {
@@ -354,14 +463,16 @@ function App() {
     setError(null)
   }
 
-  async function loadExecutionBudgetDetails(projectId: string) {
+  async function loadExecutionBudgetDetails(projectId: string, preserveDraft = false) {
     if (!can('BUDGET_READ')) return
+    const sequence = reads.current.budget = (reads.current.budget ?? 0) + 1
     try {
       const [response, procurementResponse] = await Promise.all([executionBudgetApi.get(projectId), revisionApi.procurementItems(projectId)])
       if (!response.ok) {
         throw new Error(`세부실행예산 조회 실패: ${response.status}`)
       }
       const data: ExecutionBudgetDetailResponse = await response.json()
+      if (scope.current.projectId !== projectId || reads.current.budget !== sequence) return
       let eligibleItemIds: string[] | null = null
       if (procurementResponse.ok) {
         const procurement: { has_approved_revision: boolean; item_ids: string[] } = await procurementResponse.json()
@@ -369,16 +480,21 @@ function App() {
         setRevisionProcurementItemIds(eligibleItemIds)
       }
       setExecutionBudget(data)
-      setExecutionDetails(data.details.length > 0 ? data.details : [newExecutionBudgetDetail(data.project_code)])
-      const eligibleItems = data.summary_by_item.filter((item) => item.approval_status === 'APPROVED' && item.procurement_required && (eligibleItemIds === null || eligibleItemIds.includes(item.budget_item_id)))
-      if (eligibleItems.length > 0) {
-        setSelectedExecutionItemId((current) => eligibleItems.some((item) => item.budget_item_id === current) ? current : eligibleItems[0].budget_item_id)
-      } else {
-        setSelectedExecutionItemId('')
+      if (!preserveDraft || !editor.current.dirty.budget) {
+        const details = data.details.length > 0 ? data.details : [newExecutionBudgetDetail(data.project_code)]
+        setBaselines(current => ({ ...current, budget: JSON.stringify(details) }))
+        setExecutionDetails(details)
       }
-      setError(null)
+      const eligibleItems = data.summary_by_item.filter((item) => item.approval_status === 'APPROVED' && item.procurement_required && (eligibleItemIds === null || eligibleItemIds.includes(item.budget_item_id)))
+      if (preserveDraft && editor.current.dirty.vendor) return
+      if (eligibleItems.length > 0) {
+        if (!eligibleItems.some(item => item.budget_item_id === scope.current.itemId)) updateView({ item: eligibleItems[0].budget_item_id }, true)
+      } else {
+        updateView({ item: '' }, true)
+      }
+      if (!preserveDraft) setError(null)
     } catch (err) {
-      setError(err instanceof Error ? err.message : '세부실행예산을 불러오지 못했습니다.')
+      if (!preserveDraft && scope.current.projectId === projectId) setError(err instanceof Error ? err.message : '세부실행예산을 불러오지 못했습니다.')
     }
   }
 
@@ -414,12 +530,14 @@ function App() {
     }
 
     await loadExecutionBudgetDetails(selectedProjectId)
-    await loadSettlement(selectedProjectId)
+    await loadSettlement(selectedProjectId, true)
   }
 
   async function requestExecutionBudgetApproval() {
     if (!can('BUDGET_REQUEST')) return
     if (!selectedProjectId) return
+    if (editor.current.dirty.budget) { notify('작성 중인 실행예산을 먼저 저장한 뒤 결재를 요청해주세요.', 'info'); return }
+    if (!await confirmAction({ title: '실행예산 결재 요청', message: `“${selectedProject?.project_name ?? ''}” 현장의 저장된 실행예산을 결재 요청하시겠습니까?`, confirmLabel: '결재 요청' })) return
     if (executionBudget?.applied_revision_id) {
       const response = await revisionApi.requestApproval(selectedProjectId, executionBudget.applied_revision_id)
       if (!response.ok) {
@@ -456,34 +574,59 @@ function App() {
     if (selectedProjectId && activePage !== 'approvals') params.set('projectId', selectedProjectId)
     if (approvalStatusFilter) params.set('status', approvalStatusFilter)
     if (approvalTypeFilter) params.set('type', approvalTypeFilter)
+    const scopeKey = JSON.stringify([selectedProjectId, activePage, approvalStatusFilter, approvalTypeFilter])
+    const sequence = reads.current.approvals = (reads.current.approvals ?? 0) + 1
     const response = await approvalApi.list(params)
     if (!response.ok) {
       setError(`통합결재함 조회 실패: ${response.status}`)
       return
     }
     const data: ApprovalItem[] = await response.json()
+    if (reads.current.approvals !== sequence || scopeKey !== JSON.stringify([scope.current.projectId, scope.current.page, scope.current.status, scope.current.type])) return
     setApprovals(data)
-    setSelectedApproval((current) => current ? data.find((approval) => approval.approval_id === current.approval_id) ?? null : null)
+    const detailId = scope.current.approvalId
+    if (detailId && data.some(approval => approval.approval_id === detailId && matchesApproval(approval, { projectId: scope.current.approvalProjectId }))) await loadApprovalDetail(detailId)
+    else if (detailId) { setSelectedApproval(null); setSelectedApprovalId('') }
   }
 
   async function loadApprovalDetail(approvalId: string) {
     if (!can('APPROVAL_READ')) return
+    if (scope.current.approvalId !== approvalId) setSelectedApprovalId(approvalId)
+    const sequence = reads.current.detail = (reads.current.detail ?? 0) + 1
     const response = await approvalApi.detail(approvalId)
     if (!response.ok) {
-      setError(`결재 상세 조회 실패: ${response.status}`)
+      if (scope.current.approvalId === approvalId) { setSelectedApproval(null); if (response.status === 403 || response.status === 404) setSelectedApprovalId('') }
       return
     }
-    setSelectedApproval(await response.json())
+    const detail: ApprovalItem = await response.json()
+    if (scope.current.approvalId === approvalId && reads.current.detail === sequence) {
+      if (!matchesApproval(detail, { projectId: scope.current.approvalProjectId, status: scope.current.status, type: scope.current.type })) {
+        setSelectedApproval(null)
+        updateView({ approval: null }, true)
+        return
+      }
+      setSelectedApproval(detail)
+    }
+  }
+
+  async function changeApprovalProject(projectId: string) {
+    if (projectId === approvalProjectFilter) return
+    if (rejectComment.trim() && !await confirmAction({ title: '작성 중인 결재 의견 확인', message: '입력 중인 반려·승인취소 사유를 지우고 다른 현장의 결재를 보시겠습니까?', confirmLabel: '현장 변경' })) return
+    setSelectedApproval(null)
+    setRejectComment('')
+    updateView({ approvalProject: projectId || null, approval: null })
   }
 
   async function decideApproval(approvalId: string, decision: 'approve' | 'reject' | 'cancel') {
-    if (!can('APPROVAL_DECIDE')) return
-    if (decision === 'cancel' && !window.confirm('승인 완료된 실행예산을 승인취소하고 재작업 상태로 전환할까요? 기존 승인 이력은 보존됩니다.')) {
-      return
-    }
+    if (decision === 'cancel') {
+      if (!can('APPROVAL_DECIDE')) return
+    } else if (!canDecideApproval(selectedApproval?.approval_id === approvalId ? selectedApproval : approvals.find((item) => item.approval_id === approvalId), user, can)) return
+    const decisionLabel = decision === 'approve' ? '승인' : decision === 'reject' ? '반려' : '승인취소'
+    if (!await confirmAction({ title: `결재 ${decisionLabel} 확인`, message: decision === 'cancel' ? '승인 완료된 실행예산을 승인취소하고 재작업 상태로 전환할까요? 기존 승인 이력은 보존됩니다.' : `이 결재를 ${decisionLabel}하시겠습니까?${decision === 'reject' ? `\n반려 사유: ${rejectComment}` : '\n본인 결재 단계가 처리되고 다음 단계가 화면에 반영됩니다.'}`, confirmLabel: decisionLabel, destructive: decision !== 'approve' })) return
     const response = await approvalApi.decide(approvalId, decision, { comment: decision === 'approve' ? '승인' : rejectComment })
     if (!response.ok) {
-      setError(`결재 처리 실패: ${response.status}`)
+      const body = await response.json().catch(() => null) as { message?: string } | null
+      setError(body?.message ?? `결재 처리 실패: ${response.status}`)
       return
     }
     setRejectComment('')
@@ -492,25 +635,12 @@ function App() {
     await loadApprovals()
     await refreshProjects(keyword)
     if (selectedProjectId) {
-      await loadExecutionBudgetDetails(selectedProjectId)
-      if (selectedExecutionItemId) await loadVendorComparisons(selectedProjectId, selectedExecutionItemId)
-      const summaryResponse = await projectApi.integratedSummary(selectedProjectId)
-      if (summaryResponse.ok) setSummary(await summaryResponse.json())
-      const progress = await loadProgressPayments(selectedProjectId)
+      await loadExecutionBudgetDetails(selectedProjectId, true)
+      if (selectedExecutionItemId) await loadVendorComparisons(selectedProjectId, selectedExecutionItemId, true)
+      await refreshSummary(selectedProjectId)
+      await loadProgressPayments(selectedProjectId)
       await loadPurchaseOrders(selectedProjectId)
-      await loadSettlement(selectedProjectId)
-      if (decision === 'approve' && decidedApproval.approval_type === 'PAYMENT' && decidedApproval.project_id === selectedProjectId && progress?.all_payments_approved) {
-        setActivePage('projects')
-        moveToTab('준공정산')
-      }
-    }
-    if (decision === 'approve' && decidedApproval.approval_type === 'PAYMENT' && decidedApproval.project_id !== selectedProjectId) {
-      const paymentProjectProgress = await loadProgressPayments(decidedApproval.project_id)
-      if (paymentProjectProgress?.all_payments_approved) {
-        setSelectedProjectId(decidedApproval.project_id)
-        setActivePage('projects')
-        moveToTab('준공정산')
-      }
+      await loadSettlement(selectedProjectId, true)
     }
   }
 
@@ -544,48 +674,60 @@ function App() {
     setExecutionDetails((details) => details.filter((_, detailIndex) => detailIndex !== index))
   }
 
-  async function loadVendorComparisons(projectId: string, itemId: string) {
+  async function loadVendorComparisons(projectId: string, itemId: string, preserveDraft = false) {
     if (!can('PROCUREMENT_READ')) return
+    const sequence = reads.current.vendor = (reads.current.vendor ?? 0) + 1
     try {
       const response = await procurementApi.comparisons(projectId, itemId)
       if (!response.ok) {
         throw new Error(`업체 비교견적 조회 실패: ${response.status}`)
       }
       const data: VendorComparisonResponse = await response.json()
+      if (scope.current.projectId !== projectId || scope.current.itemId !== itemId || reads.current.vendor !== sequence) return
       setVendorComparison(data)
-      setVendorComparisons(data.comparisons.length > 0 ? data.comparisons : [newVendorComparison(itemId, 'A'), newVendorComparison(itemId, 'B')])
+      if (!preserveDraft || !editor.current.dirty.vendor) {
+        const comparisons = data.comparisons.length > 0 ? data.comparisons : [newVendorComparison(itemId, 'A'), newVendorComparison(itemId, 'B')]
+        setBaselines(current => ({ ...current, vendor: JSON.stringify(comparisons) }))
+        setVendorComparisons(comparisons)
+      }
       await loadPurchaseOrderDraft(projectId, itemId, false)
-      setError(null)
+      if (!preserveDraft) setError(null)
     } catch (err) {
-      setError(err instanceof Error ? err.message : '업체 비교견적을 불러오지 못했습니다.')
+      if (!preserveDraft && scope.current.projectId === projectId && scope.current.itemId === itemId) setError(err instanceof Error ? err.message : '업체 비교견적을 불러오지 못했습니다.')
     }
   }
 
   async function loadPurchaseOrderDraft(projectId: string, itemId: string, showError = true) {
     if (!can('PROCUREMENT_READ')) return
+    const sequence = reads.current.draft = (reads.current.draft ?? 0) + 1
     const response = await procurementApi.draft(projectId, itemId)
+    if (scope.current.projectId !== projectId || scope.current.itemId !== itemId || reads.current.draft !== sequence) return
     if (!response.ok) {
       setPurchaseOrderDraft(null)
       if (showError) setError(`발주품의 초안 조회 실패: ${response.status}`)
       return
     }
-    setPurchaseOrderDraft(await response.json())
-    await loadSettlement(projectId)
+    const data: PurchaseOrderDraft = await response.json()
+    if (scope.current.projectId !== projectId || scope.current.itemId !== itemId || reads.current.draft !== sequence) return
+    setPurchaseOrderDraft(data)
+    await loadSettlement(projectId, true)
   }
 
   async function loadPurchaseOrders(projectId: string) {
     if (!can('PROCUREMENT_READ')) return
+    const sequence = reads.current.orders = (reads.current.orders ?? 0) + 1
     const response = await procurementApi.orders(projectId)
     if (!response.ok) {
       setError(`발주 이력 조회 실패: ${response.status}`)
       return
     }
     const data: PurchaseOrderHistoryResponse = await response.json()
+    if (scope.current.projectId !== projectId || reads.current.orders !== sequence) return
     setPurchaseOrderHistory(data.items)
     setPurchaseOrderHistoryRevision(data.revision_number)
   }
 
-  async function persistVendorComparisons(): Promise<VendorComparisonResponse | null> {
+  async function persistVendorComparisons(announceSave = true): Promise<VendorComparisonResponse | null> {
     if (!can('PROCUREMENT_WRITE') || draftAccess.PROCUREMENT_WRITE === false) return null
     if (!selectedProjectId || !selectedExecutionItemId) return null
     const response = await procurementApi.saveComparisons(selectedProjectId, selectedExecutionItemId, {
@@ -603,12 +745,13 @@ function App() {
           is_selected: comparison.is_selected,
           selection_reason: comparison.selection_reason ?? '',
         })),
-    })
+    }, announceSave)
     if (!response.ok) {
       setError(`업체 비교견적 저장 실패: ${response.status}`)
       return null
     }
     const data: VendorComparisonResponse = await response.json()
+    setBaselines(current => ({ ...current, vendor: JSON.stringify(data.comparisons.length > 0 ? data.comparisons : [newVendorComparison(selectedExecutionItemId, 'A')]) }))
     setVendorComparison(data)
     setVendorComparisons(data.comparisons.length > 0 ? data.comparisons : [newVendorComparison(selectedExecutionItemId, 'A')])
     await loadPurchaseOrderDraft(selectedProjectId, selectedExecutionItemId, false)
@@ -617,11 +760,13 @@ function App() {
 
   async function loadPendingApprovalCount() {
     if (!can('APPROVAL_READ')) return
+    const sequence = reads.current.pending = (reads.current.pending ?? 0) + 1
     try {
       const response = await approvalApi.list(new URLSearchParams({ status: 'REQUESTED' }))
       if (!response.ok) return
       const data: ApprovalItem[] = await response.json()
-      setPendingApprovalCount(data.length)
+      if (reads.current.pending !== sequence) return
+      setPendingApprovalCount(user?.position === 'CEO' || user?.position === 'TEAM_LEADER' ? data.filter((approval) => canDecideApproval(approval, user, can)).length : data.length)
     } catch {
       // Navigation stays usable even when the notification count cannot be refreshed.
     }
@@ -639,7 +784,8 @@ function App() {
       setError('발주품의를 요청하려면 업체명, 견적금액, 선정 업체, 선정 사유를 모두 입력해야 합니다.')
       return
     }
-    const saved = await persistVendorComparisons()
+    if (!await confirmAction({ title: '발주품의 결재 요청', message: `선정 업체: ${selected.vendor_name}\n요청 금액: ${selected.quoted_amount.toLocaleString('ko-KR')}원\n\n비교견적을 저장하고 발주품의를 결재 요청하시겠습니까?`, confirmLabel: '결재 요청' })) return
+    const saved = await persistVendorComparisons(false)
     if (!saved) return
     const response = await procurementApi.requestDraft(selectedProjectId, selectedExecutionItemId)
     if (!response.ok) {
@@ -647,7 +793,7 @@ function App() {
       return
     }
     setPurchaseOrderDraft(await response.json())
-    await loadExecutionBudgetDetails(selectedProjectId)
+    await loadExecutionBudgetDetails(selectedProjectId, true)
     await loadApprovals()
   }
 
@@ -667,7 +813,7 @@ function App() {
   async function uploadVendorComparisonFile(index: number, file: File) {
     if (!can('PROCUREMENT_WRITE') || draftAccess.PROCUREMENT_WRITE === false) return
     if (!selectedProjectId || !selectedExecutionItemId) return
-    const saved = await persistVendorComparisons()
+    const saved = await persistVendorComparisons(false)
     const comparison = saved?.comparisons[index]
     if (!comparison?.comparison_id) {
       setError('업체명 입력 후 비교견적을 저장해야 파일을 첨부할 수 있습니다.')
@@ -688,6 +834,7 @@ function App() {
       itemIndex === index ? { ...item, attachments: [...(item.attachments ?? []), attachment] } : item,
     )
     setVendorComparisons(attach)
+    if (saved) setBaselines(current => ({ ...current, vendor: JSON.stringify(attach(saved.comparisons)) }))
     setVendorComparison((current) => current ? { ...current, comparisons: attach(current.comparisons) } : current)
     setError(null)
   }
@@ -703,16 +850,14 @@ function App() {
 
   async function loadProgressPayments(projectId: string): Promise<ProgressPaymentResponse | null> {
     if (!can('PROGRESS_READ')) return null
+    const sequence = reads.current.progress = (reads.current.progress ?? 0) + 1
     try {
       const response = await paymentApi.status(projectId)
       if (!response.ok) throw new Error(`기성/지급 현황 조회 실패: ${response.status}`)
       const data: ProgressPaymentResponse = await response.json()
+      if (scope.current.projectId !== projectId || reads.current.progress !== sequence) return data
       setProgressPayment(data)
-      if (!selectedPoId && data.purchaseOrders.length > 0) {
-        const firstPurchaseOrder = data.purchaseOrders[0]
-        setSelectedPoId(firstPurchaseOrder.po_id)
-        setClaimForm({ degree: '1', claim_amount: String(firstPurchaseOrder.current_po_amount) })
-      }
+      if (!data.purchaseOrders.some(po => po.po_id === scope.current.poId)) updateView({ po: data.purchaseOrders[0]?.po_id ?? null }, true)
       setError(null)
       return data
     } catch (err) {
@@ -721,14 +866,17 @@ function App() {
     }
   }
 
-  async function loadSettlement(projectId: string) {
+  async function loadSettlement(projectId: string, preserveDraft = false) {
     if (!can('SETTLEMENT_READ')) return
+    const sequence = reads.current.settlement = (reads.current.settlement ?? 0) + 1
     try {
       const response = await settlementApi.get(projectId)
       if (!response.ok) throw new Error(`준공정산 조회 실패: ${response.status}`)
       const data: ProjectSettlement = await response.json()
+      if (scope.current.projectId !== projectId || reads.current.settlement !== sequence) return
       setSettlement(data)
-      setSettlementForm((form) => ({
+      const form = editor.current.settlementForm
+      const latestForm = {
         ...form,
         uncollected_receivable: String(data.payments.uncollected_receivable ?? 0),
         settlement_site_expense: String(data.settlement_site_expense ?? 0),
@@ -736,16 +884,21 @@ function App() {
         settlement_tax: String(data.settlement_tax ?? 0),
         settlement_notes: data.settlement_notes ?? form.settlement_notes,
         unpaid_handling_reason: data.unpaid_handling_reason ?? form.unpaid_handling_reason,
-      }))
-      setError(null)
+      }
+      if (!preserveDraft || !editor.current.dirty.settlement) {
+        setBaselines(current => ({ ...current, settlement: JSON.stringify(latestForm) }))
+        setSettlementForm(latestForm)
+      }
+      if (!preserveDraft) setError(null)
     } catch (err) {
-      setError(err instanceof Error ? err.message : '준공정산 정보를 불러오지 못했습니다.')
+      if (!preserveDraft && scope.current.projectId === projectId) setError(err instanceof Error ? err.message : '준공정산 정보를 불러오지 못했습니다.')
     }
   }
 
   async function requestSettlementApproval() {
     if (!can('SETTLEMENT_REQUEST')) return
     if (!selectedProjectId) return
+    if (!await confirmAction({ title: '준공정산 결재 요청', message: '입력한 현장경비·인건비·세금과 정산 내용을 포함해 준공정산 결재를 요청하시겠습니까?', confirmLabel: '결재 요청' })) return
     const response = await settlementApi.requestApproval(selectedProjectId, {
       uncollected_receivable: toNumber(settlementForm.uncollected_receivable),
       settlement_site_expense: toNumber(settlementForm.settlement_site_expense),
@@ -762,31 +915,48 @@ function App() {
       return
     }
     setSettlement(await response.json())
+    setBaselines(current => ({ ...current, settlement: editor.current.fingerprints.settlement }))
     await refreshProjects(keyword)
     await loadApprovals()
-    const summaryResponse = await projectApi.integratedSummary(selectedProjectId)
-    if (summaryResponse.ok) {
-      setSummary(await summaryResponse.json())
-    }
+    await refreshSummary(selectedProjectId)
   }
 
   async function createProgressClaim() {
     if (!can('PROGRESS_WRITE')) return
-    if (!selectedProjectId || !selectedPoId) return
-    const response = await paymentApi.createClaim(selectedProjectId, { po_id: selectedPoId, degree: Number(claimForm.degree || 0), claim_amount: toNumber(claimForm.claim_amount) })
+    if (!selectedProjectId || !selectedClaimPo) return
+    const latest = await loadProgressPayments(selectedProjectId)
+    if (!latest || scope.current.projectId !== selectedProjectId) return
+    const purchaseOrder = latest.purchaseOrders.find(po => po.po_id === selectedClaimPo.po_id)
+    if (!purchaseOrder || scope.current.poId !== purchaseOrder.po_id) { notify('선택한 발주를 다시 확인해주세요.', 'info'); return }
+    const defaults = claimEntryDefaults(purchaseOrder)
+    const amount = toNumber(currentClaimDraft?.amount ?? defaults.claim_amount)
+    if (!Number.isFinite(amount) || amount <= 0 || amount > toNumber(defaults.claim_amount)) {
+      notify(`기성금액은 0원보다 크고 기성 작성 가능 잔액 ${Number(defaults.claim_amount).toLocaleString('ko-KR')}원 이하여야 합니다.`, 'error')
+      return
+    }
+    if (!await confirmAction({ title: '기성 등록 확인', message: `${purchaseOrder.vendor_name} (${purchaseOrder.po_id})\n${defaults.degree}차 기성 ${amount.toLocaleString('ko-KR')}원을 등록하시겠습니까?`, confirmLabel: '기성 등록' })) return
+    if (scope.current.projectId !== selectedProjectId || scope.current.poId !== purchaseOrder.po_id) return
+    const response = await paymentApi.createClaim(selectedProjectId, { po_id: purchaseOrder.po_id, degree: Number(defaults.degree), claim_amount: amount })
     if (!response.ok) {
       setError(`기성 작성 실패: ${response.status}`)
       return
     }
     const data: ProgressPaymentResponse = await response.json()
     setProgressPayment(data)
-    setClaimForm({ degree: '1', claim_amount: '0' })
-    await loadSettlement(selectedProjectId)
+    setClaimDraft(null)
+    await loadSettlement(selectedProjectId, true)
+  }
+
+  async function selectProgressPurchaseOrder(poId: string) {
+    if (poId === selectedClaimPo?.po_id) return
+    if (claimEdited && !await confirmAction({ title: '작성 중인 기성금액 확인', message: '입력 중인 기성금액을 저장하지 않고 다른 발주를 선택하시겠습니까?', confirmLabel: '발주 변경' })) return
+    setClaimDraft(null)
+    setSelectedPoId(poId)
   }
 
   async function deleteProgressClaim(claimId: string) {
     if (!can('PROGRESS_WRITE')) return
-    if (!selectedProjectId || !window.confirm('결재 대기 또는 반려된 기성 건을 삭제하시겠습니까? 연결된 결재 요청도 함께 삭제됩니다.')) return
+    if (!selectedProjectId || !await confirmAction({ title: '기성 삭제 확인', message: '결재 대기 또는 반려된 기성 건을 삭제하시겠습니까? 연결된 결재 요청도 함께 삭제됩니다.', confirmLabel: '삭제', destructive: true })) return
     const response = await paymentApi.deleteClaim(selectedProjectId, claimId)
     if (!response.ok) {
       setError(`기성 삭제 실패: ${response.status}`)
@@ -794,12 +964,13 @@ function App() {
     }
     const data: ProgressPaymentResponse = await response.json()
     setProgressPayment(data)
-    await Promise.all([loadSettlement(selectedProjectId), loadApprovals()])
+    await Promise.all([loadSettlement(selectedProjectId, true), loadApprovals()])
   }
 
   async function requestPaymentApprovals() {
-    if (!can('PAYMENT_REQUEST')) return
+    if (user?.position !== 'FINANCE' || !can('PAYMENT_REQUEST')) return
     if (!selectedProjectId || selectedPaymentPoIds.length === 0) return
+    if (!await confirmAction({ title: '지급결재 요청', message: `선택한 ${selectedPaymentPoIds.length}개 업체의 지급결재를 대표에게 요청하시겠습니까? 실제 송금 등록과는 별도입니다.`, confirmLabel: '지급결재 요청' })) return
     const response = await paymentApi.requestPayments(selectedProjectId, { po_ids: selectedPaymentPoIds })
     if (!response.ok) {
       setError(`지급요청 실패: ${response.status}`)
@@ -841,6 +1012,12 @@ function App() {
   function moveToTab(tab: string) {
     setActiveTab(tab)
     window.setTimeout(() => tabRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' }), 0)
+  }
+
+  async function selectProject(projectId: string | null) {
+    if (projectId === selectedProjectId) return
+    if (hasUnsavedDraft() && !await confirmAction({ title: '작성 중인 내용 확인', message: '저장하지 않은 내용이 있습니다. 저장하지 않고 다른 프로젝트로 이동하시겠습니까?', confirmLabel: '이동', destructive: true })) return
+    updateView({ project: projectId, tab: tabs[0], item: null, po: null, approval: null })
   }
 
   const contractTotal = useMemo(() => {
@@ -915,6 +1092,7 @@ function App() {
       <div className="mx-auto flex w-full max-w-[1440px] flex-col gap-6 px-4 py-6 sm:px-6 lg:px-8">
 
         {notice && <p role="status" className="rounded bg-amber-50 p-3 text-sm">{notice}</p>}
+        <p className="text-xs text-slate-500">변경 내용은 자동으로 확인합니다. 새로고침해도 보던 화면이 유지됩니다.{Object.values(dirty).some(Boolean) && <span className="ml-2 font-semibold text-amber-700">작성 중인 입력 내용은 자동 갱신으로 덮어쓰지 않습니다.</span>}</p>
         {error && (
           <section className="flex items-start gap-3 rounded-md border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
             <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" aria-hidden="true" />
@@ -929,11 +1107,8 @@ function App() {
             projects={projects}
             keyword={keyword}
             setKeyword={setKeyword}
-            onSelect={(projectId) => {
-              setActiveTab('고객 견적·계약 관리')
-              setSelectedProjectId(projectId)
-            }}
-            onDelete={deleteProject}
+            onSelect={projectId => { void selectProject(projectId) }}
+            onDelete={userAction('프로젝트 삭제', deleteProject, undefined)}
           />
         ) : null}
 
@@ -947,9 +1122,9 @@ function App() {
               project={selectedProject}
               summary={summary}
               executionBudget={executionBudget}
-              onBack={() => setSelectedProjectId(null)}
-              onStartConstruction={startConstruction}
-              onSynchronizePreparation={synchronizePreparationStatus}
+              onBack={() => { void selectProject(null) }}
+              onStartConstruction={userAction('공사 시작', startConstruction, undefined)}
+              onSynchronizePreparation={userAction('프로젝트 상태 변경', synchronizePreparationStatus, undefined)}
               onMoveToTab={moveToTab}
             />
 
@@ -978,10 +1153,10 @@ function App() {
                     selectedFileType={selectedFileType}
                     setTargetProfitRate={setTargetProfitRate}
                     setSelectedFileType={setSelectedFileType}
-                    saveCustomerContract={saveCustomerContract}
+                    saveCustomerContract={userAction('계약 저장', saveCustomerContract, false)}
                     openChangeManagement={() => setActivePage('changes')}
-                    uploadContractFile={uploadContractFile}
-                    deleteContractFile={deleteContractFile}
+                    uploadContractFile={userAction('계약 파일 등록', uploadContractFile, undefined)}
+                    deleteContractFile={userAction('계약 파일 삭제', deleteContractFile, undefined)}
                     updateContractItem={updateContractItem}
                     addContractItem={addContractItem}
                     removeContractItem={removeContractItem}
@@ -993,8 +1168,8 @@ function App() {
                     details={executionDetails}
                     summary={executionSummary}
                     totalAmount={executionTotal}
-                    saveExecutionBudgetDetails={saveExecutionBudgetDetails}
-                    requestExecutionBudgetApproval={requestExecutionBudgetApproval}
+                    saveExecutionBudgetDetails={userAction('실행예산 저장', saveExecutionBudgetDetails, undefined)}
+                    requestExecutionBudgetApproval={userAction('실행예산 결재 요청', requestExecutionBudgetApproval, undefined)}
                     approvalFiles={executionBudgetApprovalFiles}
                     setApprovalFiles={setExecutionBudgetApprovalFiles}
                     contractFiles={contract?.files ?? []}
@@ -1012,12 +1187,12 @@ function App() {
                     vendorComparison={vendorComparison}
                     comparisons={vendorComparisons}
                     purchaseOrderDraft={purchaseOrderDraft}
-                    saveVendorComparisons={saveVendorComparisons}
-                    requestPurchaseOrder={requestPurchaseOrder}
+                    saveVendorComparisons={userAction('비교견적 저장', saveVendorComparisons, undefined)}
+                    requestPurchaseOrder={userAction('발주품의 결재 요청', requestPurchaseOrder, undefined)}
                     updateVendorComparison={updateVendorComparison}
                     addVendorComparison={addVendorComparison}
                     removeVendorComparison={removeVendorComparison}
-                    uploadVendorComparisonFile={uploadVendorComparisonFile}
+                    uploadVendorComparisonFile={userAction('견적 첨부파일 등록', uploadVendorComparisonFile, undefined)}
                     openPurchaseOrderHistory={() => moveToTab('계약/발주 이력')}
                   /></WriteScope>
                 )}
@@ -1027,35 +1202,31 @@ function App() {
                 {activeTab === '기성 및 지급 현황' && can('PROGRESS_READ') && progressPayment && (
                   <ProgressPaymentPanel
                     projectId={selectedProjectId!}
-                    onPaymentRecorded={() => { void loadProgressPayments(selectedProjectId!); void projectApi.integratedSummary(selectedProjectId!).then(async r => { if (r.ok) setSummary(await r.json()) }) }}
+                    onPaymentRecorded={() => { void loadProgressPayments(selectedProjectId!); void refreshSummary(selectedProjectId!) }}
                     progressPayment={progressPayment}
                     selectedPoId={selectedPoId}
-                    setSelectedPoId={(poId) => {
-                      setSelectedPoId(poId)
-                      const purchaseOrder = progressPayment.purchaseOrders.find((item) => item.po_id === poId)
-                      setClaimForm({ degree: '1', claim_amount: String(purchaseOrder?.current_po_amount ?? 0) })
-                    }}
+                    setSelectedPoId={poId => { void selectProgressPurchaseOrder(poId) }}
                     claimForm={claimForm}
-                    setClaimForm={setClaimForm}
+                    setClaimAmount={value => { if (selectedProjectId && selectedClaimPo) setClaimDraft({ projectId: selectedProjectId, poId: selectedClaimPo.po_id, amount: value }) }}
                     selectedPaymentPoIds={selectedPaymentPoIds}
                     setSelectedPaymentPoIds={setSelectedPaymentPoIds}
-                    createProgressClaim={createProgressClaim}
-                    deleteProgressClaim={deleteProgressClaim}
-                    requestPaymentApprovals={requestPaymentApprovals}
+                    createProgressClaim={userAction('기성 등록', createProgressClaim, undefined)}
+                    deleteProgressClaim={userAction('기성 삭제', deleteProgressClaim, undefined)}
+                    requestPaymentApprovals={userAction('지급결재 요청', requestPaymentApprovals, undefined)}
                   />
                 )}
                 {activeTab === '현장 작업일지' && can('SITE_READ') && selectedProjectId && (
-                  <DailyLogPanel project={selectedProject} projectId={selectedProjectId} />
+                  <DailyLogPanel key={selectedProjectId} project={selectedProject} projectId={selectedProjectId} />
                 )}
                 {activeTab === '현장 회의록' && can('SITE_READ') && selectedProjectId && (
-                  <MeetingMinutesPanel project={selectedProject} projectId={selectedProjectId} />
+                  <MeetingMinutesPanel key={selectedProjectId} project={selectedProject} projectId={selectedProjectId} />
                 )}
                 {activeTab === '준공정산' && can('SETTLEMENT_READ') && settlement && (
                   <WriteScope permission="SETTLEMENT_REQUEST"><SettlementPanel
                     settlement={settlement}
                     form={settlementForm}
                     setForm={setSettlementForm}
-                    requestSettlementApproval={requestSettlementApproval}
+                    requestSettlementApproval={userAction('준공정산 결재 요청', requestSettlementApproval, undefined)}
                   /></WriteScope>
                 )}
                 {activeTab !== '고객 견적·계약 관리' && activeTab !== '세부실행예산' && activeTab !== '업체 비교견적' && activeTab !== '계약/발주 이력' && activeTab !== '기성 및 지급 현황' && activeTab !== '현장 작업일지' && activeTab !== '현장 회의록' && activeTab !== '준공정산' && (
@@ -1073,8 +1244,12 @@ function App() {
         {activePage === 'approvals' && can('APPROVAL_READ') && (
           <section className="rounded-md border border-slate-200 bg-white p-4 shadow-sm">
             <ApprovalInboxPanel
-              approvals={approvals}
-              selectedApproval={selectedApproval}
+              approvals={visibleApprovals}
+              selectedApproval={selectedApproval?.approval_id === selectedApprovalId && matchesApproval(selectedApproval, { projectId: approvalProjectFilter, status: approvalStatusFilter, type: approvalTypeFilter }) ? selectedApproval : null}
+              projects={approvalProjectChoices}
+              projectFilter={approvalProjectFilter}
+              setProjectFilter={projectId => { void changeApprovalProject(projectId) }}
+              totalCount={statusApprovals.length}
               statusFilter={approvalStatusFilter}
               typeFilter={approvalTypeFilter}
               rejectComment={rejectComment}
@@ -1082,9 +1257,9 @@ function App() {
               setTypeFilter={setApprovalTypeFilter}
               setRejectComment={setRejectComment}
               loadApprovalDetail={loadApprovalDetail}
-              approveApproval={(approvalId) => decideApproval(approvalId, 'approve')}
-              rejectApproval={(approvalId) => decideApproval(approvalId, 'reject')}
-              cancelApproval={(approvalId) => decideApproval(approvalId, 'cancel')}
+              approveApproval={userAction('결재 승인', (approvalId: string) => decideApproval(approvalId, 'approve'), undefined)}
+              rejectApproval={userAction('결재 반려', (approvalId: string) => decideApproval(approvalId, 'reject'), undefined)}
+              cancelApproval={userAction('결재 승인취소', (approvalId: string) => decideApproval(approvalId, 'cancel'), undefined)}
             />
           </section>
         )}
@@ -1104,7 +1279,7 @@ function App() {
                   aria-label="변경관리 이력 조회 프로젝트"
                   className="input mt-2 w-full"
                   value={selectedProjectId ?? ''}
-                  onChange={(event) => setSelectedProjectId(event.target.value || null)}
+                  onChange={event => { void selectProject(event.target.value || null) }}
                 >
                   <option value="">프로젝트를 선택하세요</option>
                   {projects.map((project) => (
@@ -1117,7 +1292,7 @@ function App() {
             </div>
             {selectedProjectId ? (
               <div className="space-y-8">
-                <RevisionManagementPanel projectId={selectedProjectId} projectCode={selectedProject?.project_code} projectName={selectedProject?.project_name} />
+                <RevisionManagementPanel key={selectedProjectId} projectId={selectedProjectId} projectCode={selectedProject?.project_code} projectName={selectedProject?.project_name} />
               </div>
             ) : (
               <div className="rounded-md border border-dashed border-slate-300 bg-slate-50 p-8 text-center text-sm text-slate-500">

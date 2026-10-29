@@ -18,6 +18,14 @@ public class PermissionService {
  public void require(Permission permission) { if(!has(permission)) throw new org.springframework.security.access.AccessDeniedException("권한이 없습니다."); }
  public void requireAdmin() { if(actor.user().getAccountType()!=AccountType.ADMIN) throw new org.springframework.security.access.AccessDeniedException("관리자만 사용할 수 있습니다."); }
  @Transactional public void initializeDefaults() {
-  for(Position p:Position.values()) for(Permission key:Permission.values()) { String id=p+":"+key; if(!permissions.existsById(id)) permissions.save(new PositionPermission(p,key)); }
+  for(Position p:Position.values()) for(Permission key:Permission.values()) {
+   String id=p+":"+key;
+   var existing=permissions.findById(id);
+   if(existing.isEmpty()) permissions.save(new PositionPermission(p,key));
+   else if(key==Permission.PAYMENT_REQUEST && existing.get().isAllowed()!=key.defaultAllowed(p)) {
+    existing.get().update(key.defaultAllowed(p),"finance-payment-request-policy");
+    permissions.save(existing.get());
+   }
+  }
  }
 }

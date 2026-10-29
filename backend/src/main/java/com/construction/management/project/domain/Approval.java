@@ -50,6 +50,17 @@ public class Approval extends com.construction.management.auth.AuthoredEntity {
 	@Column(name = "status", nullable = false)
 	private ApprovalStatus status = ApprovalStatus.REQUESTED;
 
+	@Enumerated(EnumType.STRING)
+	private ApprovalStage approvalStage;
+	private String requesterPosition;
+	private String teamLeaderId;
+	private String teamLeaderName;
+	private String teamLeaderApprovedBy;
+	private String teamLeaderApprovedUserId;
+	private LocalDateTime teamLeaderApprovedAt;
+	@Column(length = 1000)
+	private String teamLeaderComment;
+
 	@Column(name = "approver")
 	private String approver;
 	private String approverUserId;
@@ -112,11 +123,35 @@ public class Approval extends com.construction.management.auth.AuthoredEntity {
 	}
 
 	public void approve(String approver, String comment) {
+		if (status != ApprovalStatus.REQUESTED || getApprovalStage() != ApprovalStage.CEO) {
+			throw new IllegalStateException("팀장 승인 후 대표 결재 대기 상태에서만 최종 승인할 수 있습니다.");
+		}
 		this.status = ApprovalStatus.APPROVED;
+		this.approvalStage = ApprovalStage.COMPLETE;
 		this.approver = com.construction.management.auth.CurrentActor.name();
 		this.approverUserId = com.construction.management.auth.CurrentActor.id();
 		this.comment = comment;
 		this.decidedAt = LocalDateTime.now();
+	}
+
+	public void configureRoute(String requesterPosition, String teamLeaderId, String teamLeaderName) {
+		if (this.approvalStage != null) throw new IllegalStateException("이미 설정된 결재선은 변경할 수 없습니다.");
+		this.requesterPosition = requesterPosition;
+		this.teamLeaderId = teamLeaderId;
+		this.teamLeaderName = teamLeaderName;
+		this.approvalStage = "STAFF".equals(requesterPosition) ? ApprovalStage.TEAM_LEADER : ApprovalStage.CEO;
+	}
+
+	public void approveByTeamLeader(String comment) {
+		if (status != ApprovalStatus.REQUESTED || getApprovalStage() != ApprovalStage.TEAM_LEADER
+				|| !java.util.Objects.equals(teamLeaderId, com.construction.management.auth.CurrentActor.id())) {
+			throw new IllegalStateException("지정된 팀장만 1차 결재를 처리할 수 있습니다.");
+		}
+		this.teamLeaderApprovedBy = com.construction.management.auth.CurrentActor.name();
+		this.teamLeaderApprovedUserId = com.construction.management.auth.CurrentActor.id();
+		this.teamLeaderApprovedAt = LocalDateTime.now();
+		this.teamLeaderComment = comment;
+		this.approvalStage = ApprovalStage.CEO;
 	}
 
 	public void reject(String approver, String comment) {
@@ -146,6 +181,14 @@ public class Approval extends com.construction.management.auth.AuthoredEntity {
 	public String getRequestUser() { return requestUser; }
 	public String getRequestReason() { return requestReason; }
 	public ApprovalStatus getStatus() { return status; }
+	public ApprovalStage getApprovalStage() { return approvalStage == null ? (status == ApprovalStatus.APPROVED ? ApprovalStage.COMPLETE : ApprovalStage.CEO) : approvalStage; }
+	public String getRequesterPosition() { return requesterPosition; }
+	public String getTeamLeaderId() { return teamLeaderId; }
+	public String getTeamLeaderName() { return teamLeaderName; }
+	public String getTeamLeaderApprovedBy() { return teamLeaderApprovedBy; }
+	public String getTeamLeaderApprovedUserId() { return teamLeaderApprovedUserId; }
+	public LocalDateTime getTeamLeaderApprovedAt() { return teamLeaderApprovedAt; }
+	public String getTeamLeaderComment() { return teamLeaderComment; }
 	public String getApproverUserId() { return approverUserId; }
 	public String getCancelledUserId() { return cancelledUserId; }
 	public String getApprover() { return approver; }

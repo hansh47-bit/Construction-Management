@@ -1,6 +1,9 @@
 import { useAuth } from '../auth/auth'
 import { PermissionGate } from '../auth/Permissions'
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
+import { confirmAction, notify } from '../../lib/feedback'
+import { useDraftGuard, useLiveRefresh } from '../../lib/use-live-refresh'
+import { useWorkspaceState } from '../../lib/use-workspace-state'
 import { CheckCircle2, PlusCircle, Save } from 'lucide-react'
 import { formatDateTime, formatWorkflowStatus, formatWon, toNumber } from '../../lib/format'
 import type { ProjectRevision, ProjectRevisionContractItem, ProjectRevisionHistory } from '../../types/domain'
@@ -12,6 +15,7 @@ export function RevisionManagementPanel({ projectId, projectCode, projectName }:
   const { can, user } = useAuth()
   const [revisions, setRevisions] = useState<ProjectRevision[]>([])
   const [active, setActive] = useState<ProjectRevision | null>(null)
+  const [activeId, setActiveId] = useWorkspaceState<string | null>('revision', null)
   const [history, setHistory] = useState<ProjectRevisionHistory | null>(null)
   const [title, setTitle] = useState('')
   const [reason, setReason] = useState('')
@@ -19,8 +23,18 @@ export function RevisionManagementPanel({ projectId, projectCode, projectName }:
   const [targetProfitRate, setTargetProfitRate] = useState('0')
   const [message, setMessage] = useState('')
   const [isSaving, setIsSaving] = useState(false)
+  const [baseline, setBaseline] = useState('')
+  const fingerprint = JSON.stringify({ title, reason, contractItems, targetProfitRate })
+  const dirty = active ? !!baseline && fingerprint !== baseline : !!title || !!reason
+  const dirtyRef = useRef(dirty)
+  useLayoutEffect(() => { dirtyRef.current = dirty }, [dirty])
+  const readSequence = useRef(0)
+  useDraftGuard(dirty)
+  useLiveRefresh(() => load(true))
 
   function selectRevision(revision: ProjectRevision) {
+    setBaseline(JSON.stringify({ title: revision.title, reason: revision.reason, contractItems: revision.contract_items, targetProfitRate: String(revision.target_profit_rate) }))
+    setActiveId(revision.revision_id)
     setActive(revision)
     setTitle(revision.title)
     setReason(revision.reason)
@@ -28,18 +42,25 @@ export function RevisionManagementPanel({ projectId, projectCode, projectName }:
     setTargetProfitRate(String(revision.target_profit_rate))
   }
 
-  async function load() {
+  async function load(preserveDraft = false) {
+    const sequence = ++readSequence.current
     const response = await revisionApi.list(projectId)
     if (!response.ok) return
     const data: ProjectRevision[] = await response.json()
+    if (sequence !== readSequence.current) return
     setRevisions(data)
-    if (active) {
-      const refreshed = data.find((item) => item.revision_id === active.revision_id)
-      if (refreshed) selectRevision(refreshed)
+    if (activeId) {
+      const refreshed = data.find((item) => item.revision_id === activeId)
+      if (refreshed) {
+        if (preserveDraft && dirtyRef.current) setActive(refreshed)
+        else selectRevision(refreshed)
+        const historyResponse = await revisionApi.history(projectId, activeId)
+        if (historyResponse.ok && sequence === readSequence.current) setHistory(await historyResponse.json())
+      } else { setActive(null); setActiveId(null) }
     }
   }
 
-  useEffect(() => { void load() }, [projectId])
+  useEffect(() => { void load(true) }, [projectId, activeId])
 
   useEffect(() => {
     if (!active?.revision_id) { setHistory(null); return }
@@ -92,6 +113,8 @@ export function RevisionManagementPanel({ projectId, projectCode, projectName }:
   async function requestApproval() {
     if (!can('CHANGE_REQUEST') || !ownsActive) return
     if (!active) return
+    if (dirtyRef.current) { notify('계약 변경 내용을 먼저 저장한 뒤 결재를 요청해주세요.', 'info'); return }
+    if (!await confirmAction({ title: '계약 변경 결재 요청', message: `${projectName ?? projectCode ?? projectId}의 ${active.revision_number}차 계약 변경을 결재 요청하시겠습니까?`, confirmLabel: '결재 요청' })) return
     setIsSaving(true)
     try {
       const response = await revisionApi.requestApproval(projectId, active.revision_id)

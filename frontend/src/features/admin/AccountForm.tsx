@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import { useDraftGuard } from '../../lib/use-live-refresh'
 import type { FormEvent } from 'react'
 import { adminApi } from './api'
 import type { Account } from './api'
@@ -6,6 +7,8 @@ import { positionLabels } from '../auth/auth'
 import type { Position } from '../auth/auth'
 export function AccountForm({ account, close, saved }: { account: Account | null; close: () => void; saved: () => void }) {
  const [form, setForm] = useState({ login_id: '', name: account?.name ?? '', position: account?.position ?? 'STAFF', status: account?.status ?? 'ACTIVE', phone: account?.phone ?? '', email: account?.email ?? '', temporary_password: '', reason: '' })
+ const [baseline] = useState(() => JSON.stringify(form))
+ useDraftGuard(JSON.stringify(form) !== baseline)
  const [busy, setBusy] = useState(false); const [error, setError] = useState('')
  function update(key: keyof typeof form, value: string) { setForm(f => ({ ...f, [key]: value })) }
  async function submit(event: FormEvent) { event.preventDefault(); if (busy) return; setBusy(true); setError(''); try { if (account) await adminApi.update(account.id, { name: form.name, position: account.account_type === 'ADMIN' ? null : form.position, status: form.status, phone: form.phone || null, email: form.email || null, reason: form.reason, version: account.version }); else await adminApi.create({ login_id: form.login_id, name: form.name, position: form.position, temporary_password: form.temporary_password, phone: form.phone || null, email: form.email || null }); saved() } catch (e) { setError((e as Error).message) } finally { setBusy(false) } }

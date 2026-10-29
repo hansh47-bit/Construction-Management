@@ -236,7 +236,7 @@ public class ChangeManagementService {
 	}
 
 	@Transactional
-	@org.springframework.security.access.prepost.PreAuthorize("@businessPolicy.allow('APPROVAL_DECIDE')")
+	@org.springframework.security.access.prepost.PreAuthorize("@businessPolicy.allow('APPROVAL_DECIDE') or @businessPolicy.allow('APPROVAL_REVIEW')")
 	public void rejectChangeApproval(Approval approval) {
 		String code = approval.getTargetId();
 		if ("CONTRACT_CHANGE".equals(approval.getApprovalType())) contractChangeRepository.findByChangeCode(code).forEach(change -> { change.reject(); contractChangeRepository.save(change); });
@@ -388,6 +388,7 @@ public class ChangeManagementService {
 	private void createApproval(String projectId, String changeCode, String type, String title, BigDecimal delta, BigDecimal previous, String reason) {
 		Approval approval = new Approval(id(), projectId, type, changeCode, changeCode + " " + title,
 				previous.add(delta), previous, delta, com.construction.management.auth.CurrentActor.name(), reason);
+		businessPolicy.prepareApproval(approval);
 		approvalRepository.save(approval);
 		if ("CONTRACT_CHANGE".equals(type)) contractChangeRepository.findByChangeCode(changeCode).forEach(change -> { change.linkApproval(approval.getApprovalId()); contractChangeRepository.save(change); });
 		if ("BUDGET_CHANGE".equals(type)) budgetChangeRepository.findByChangeCode(changeCode).forEach(change -> { change.linkApproval(approval.getApprovalId()); budgetChangeRepository.save(change); });

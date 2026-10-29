@@ -78,7 +78,9 @@ public class PaymentRequestService {
 			String approvalId = nextApprovalId();
 			String paymentRequestId = "PAY-REQ-" + UUID.randomUUID().toString().substring(0, 8).toUpperCase();
 			paymentRequestRepository.save(new PaymentRequest(paymentRequestId, projectId, poId, payableClaims.stream().map(ProgressClaim::getClaimId).collect(Collectors.joining(",")), requestedAmount, approvalId));
-			approvalRepository.save(new Approval(approvalId, projectId, TYPE_PAYMENT, paymentRequestId, po.getVendorName() + " 지급 승인 요청", requestedAmount, BigDecimal.ZERO, requestedAmount, com.construction.management.auth.CurrentActor.name(), "승인 기성 미지급분 지급 요청"));
+			Approval approval = new Approval(approvalId, projectId, TYPE_PAYMENT, paymentRequestId, po.getVendorName() + " 지급 승인 요청", requestedAmount, BigDecimal.ZERO, requestedAmount, com.construction.management.auth.CurrentActor.name(), "승인 기성 미지급분 지급 요청");
+			businessPolicy.prepareApproval(approval);
+			approvalRepository.save(approval);
 		}
 	}
 

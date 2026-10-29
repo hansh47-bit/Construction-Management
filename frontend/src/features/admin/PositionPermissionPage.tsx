@@ -3,8 +3,12 @@ import { adminApi } from './api'
 import type { PositionPermissions } from './api'
 import { positionLabels } from '../auth/auth'
 import type { Position } from '../auth/auth'
+import { useDraftGuard, useLiveRefresh } from '../../lib/use-live-refresh'
+import { useWorkspaceState } from '../../lib/use-workspace-state'
 export function PositionPermissionPage() {
- const [all, setAll] = useState<PositionPermissions[]>([]); const [position, setPosition] = useState<Position>('CEO'); const [draft, setDraft] = useState<Record<string, boolean>>({}); const [reason, setReason] = useState(''); const [error, setError] = useState(''); const [busy, setBusy] = useState(false); const [confirm, setConfirm] = useState(false)
+ const [all, setAll] = useState<PositionPermissions[]>([]); const [position, setPosition] = useWorkspaceState<Position>('permissionPosition', 'CEO', ['CEO', 'TEAM_LEADER', 'FINANCE', 'STAFF']); const [draft, setDraft] = useState<Record<string, boolean>>({}); const [reason, setReason] = useState(''); const [error, setError] = useState(''); const [busy, setBusy] = useState(false); const [confirm, setConfirm] = useState(false)
+ useLiveRefresh(async () => { if (!Object.keys(draft).length && !confirm) setAll(await adminApi.positions()) })
+ useDraftGuard(!!Object.keys(draft).length || !!reason)
  useEffect(() => { void adminApi.positions().then(setAll).catch(e => setError((e as Error).message)) }, [])
  const current = all.find(p => p.position === position); const changes = current?.permissions.filter(p => draft[p.key] !== undefined && draft[p.key] !== p.allowed) ?? []
  function toggle(key: string, allowed: boolean) { setDraft(prev => ({ ...prev, [key]: allowed })); setError('') }

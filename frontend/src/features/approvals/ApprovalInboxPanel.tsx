@@ -1,4 +1,7 @@
 import { PermissionGate } from '../auth/Permissions'
+import { useAuth } from '../auth/auth'
+import { approvalStatusLabel, canDecideApproval } from './workflow'
+import type { ApprovalProjectOption } from './project-filter'
 import { Download } from 'lucide-react'
 import { apiUrl } from '../../lib/api-client'
 import { formatDate, formatDateTime, formatWon } from '../../lib/format'
@@ -143,6 +146,10 @@ function ApprovalDocument({ approval }: { approval: ApprovalItem }) {
 export function ApprovalInboxPanel({
   approvals,
   selectedApproval,
+  projects,
+  projectFilter,
+  setProjectFilter,
+  totalCount,
   statusFilter,
   typeFilter,
   rejectComment,
@@ -156,6 +163,10 @@ export function ApprovalInboxPanel({
 }: {
   approvals: ApprovalItem[]
   selectedApproval: ApprovalItem | null
+  projects: ApprovalProjectOption[]
+  projectFilter: string
+  setProjectFilter: (value: string) => void
+  totalCount: number
   statusFilter: string
   typeFilter: string
   rejectComment: string
@@ -167,43 +178,67 @@ export function ApprovalInboxPanel({
   rejectApproval: (approvalId: string) => void
   cancelApproval: (approvalId: string) => void
 }) {
-  const pending = selectedApproval?.status === 'REQUESTED'
+  const { user, can } = useAuth()
+  const pending = canDecideApproval(selectedApproval, user, can)
+  const isFinanceCirculation = user?.position === 'FINANCE'
   const canCancelApprovedExecutionBudget = selectedApproval?.status === 'APPROVED'
     && selectedApproval.approval_type === 'EXECUTION_BUDGET'
+    && can('APPROVAL_DECIDE')
 
   return (
     <div>
       <div className="flex flex-col gap-4 border-b border-slate-200 pb-4 lg:flex-row lg:items-center lg:justify-between">
         <div>
           <h3 className="text-lg font-semibold text-slate-950">통합결재함</h3>
-          <p className="mt-1 text-sm text-slate-500">실행예산, 변경 차수, 발주품의 결재를 한 화면에서 승인하거나 반려합니다.</p>
+          <p className="mt-1 text-sm text-slate-500">직원 요청은 지정 팀장 승인 후 대표에게, 팀장·재무 요청은 바로 대표에게 전달됩니다.</p>
+          <p className="mt-1 text-xs font-medium text-cyan-800">{isFinanceCirculation ? '재무 회람: 모든 결재의 진행 상황과 문서를 조회합니다. 승인·반려는 해당 결재자가 처리합니다.' : '대표 최종 승인 문서는 전 직원에게 공유됩니다.'}</p>
         </div>
-        <div className="flex flex-wrap gap-2">
-          <select value={statusFilter} onChange={(event) => setStatusFilter(event.target.value)} className="input w-36">
+        <div className="grid w-full gap-2 sm:grid-cols-2 lg:w-[420px] lg:shrink-0">
+          <label className="block min-w-0 text-xs font-semibold text-slate-600 sm:col-span-2">
+            현장별 보기
+            <select aria-label="결재 현장 선택" value={projectFilter} onChange={event => setProjectFilter(event.target.value)} className="input mt-1 w-full">
+              <option value="">전체 현장 ({totalCount}건)</option>
+              {projects.map(project => <option key={project.project_id} value={project.project_id}>{project.project_name || '현장명 미입력'}{project.project_code ? ` · ${project.project_code}` : ''} ({project.count}건)</option>)}
+            </select>
+          </label>
+          <label className="block min-w-0 text-xs font-semibold text-slate-600">
+          결재 상태
+          <select aria-label="결재 상태" value={statusFilter} onChange={(event) => setStatusFilter(event.target.value)} className="input mt-1 w-full">
             <option value="">전체 상태</option>
             <option value="REQUESTED">결재대기</option>
-            <option value="APPROVED">승인</option>
+            <option value="APPROVED">최종 승인 · 전체 공유</option>
             <option value="REJECTED">반려</option>
             <option value="CANCELLED">승인취소</option>
           </select>
-          <select value={typeFilter} onChange={(event) => setTypeFilter(event.target.value)} className="input w-44">
+          </label>
+          <label className="block min-w-0 text-xs font-semibold text-slate-600">
+          결재 유형
+          <select aria-label="결재 유형" value={typeFilter} onChange={(event) => setTypeFilter(event.target.value)} className="input mt-1 w-full">
             <option value="">전체 유형</option>
             <option value="EXECUTION_BUDGET">실행예산</option>
             <option value="PROJECT_REVISION">계약·실행예산 변경</option>
             <option value="PURCHASE_ORDER">발주</option>
             <option value="PROGRESS_CLAIM">기성 승인</option>
+            <option value="PAYMENT">지급 결재</option>
             <option value="FINAL_SETTLEMENT">준공정산 최종결재</option>
           </select>
+          </label>
         </div>
+      </div>
+
+      <div className="mt-4 flex flex-wrap items-center justify-between gap-2 rounded-lg border border-cyan-100 bg-cyan-50 px-4 py-3">
+        <p role="status" aria-label="현재 결재 조회 현장" className="text-sm text-cyan-950"><strong>{projectFilter ? projects.find(project => project.project_id === projectFilter)?.project_name || '선택한 현장' : '전체 현장'}</strong><span className="ml-3 font-semibold">{approvals.length}건</span><span className="ml-2 text-xs text-cyan-700">선택한 상태·유형 기준</span></p>
+        {projectFilter && <button type="button" onClick={() => setProjectFilter('')} className="rounded-md border border-cyan-200 bg-white px-3 py-1.5 text-xs font-semibold text-cyan-800 hover:bg-cyan-100">전체 현장 보기</button>}
       </div>
 
       <div className="grid gap-5 py-5 xl:grid-cols-[minmax(0,1.4fr)_minmax(360px,0.8fr)]">
         <div className="overflow-x-auto">
-          <table className="min-w-[980px] text-left text-sm">
+          <table aria-label="통합결재 목록" className="min-w-[980px] text-left text-sm">
             <thead className="bg-slate-50 text-xs font-semibold uppercase text-slate-500">
               <tr>
+                <th className="px-3 py-3">순번</th>
                 <th className="px-3 py-3">요청일</th>
-                <th className="px-3 py-3">프로젝트</th>
+                <th className="px-3 py-3">현장</th>
                 <th className="px-3 py-3">유형</th>
                 <th className="px-3 py-3">제목</th>
                 <th className="px-3 py-3">요청금액</th>
@@ -222,7 +257,7 @@ export function ApprovalInboxPanel({
                   <td className="px-3 py-3 text-slate-600">{approval.title}</td>
                   <td className="px-3 py-3 font-semibold text-slate-900">{formatWon(approval.requested_amount)}</td>
                   <td className={`px-3 py-3 font-semibold ${varianceClass(approval.variance_amount)}`}>{formatWon(approval.variance_amount)}</td>
-                  <td className="px-3 py-3 text-slate-600">{approval.status}</td>
+                  <td className="px-3 py-3 text-slate-600">{approvalStatusLabel(approval)}{isFinanceCirculation && <span className="mt-1 block text-xs text-cyan-700">재무 회람</span>}</td>
                   <td className="px-3 py-3">
                     <button type="button" onClick={() => loadApprovalDetail(approval.approval_id)} className="rounded-md border border-slate-300 px-3 py-1.5 text-xs font-semibold text-slate-700 hover:bg-slate-50">
                       상세
@@ -232,7 +267,7 @@ export function ApprovalInboxPanel({
               ))}
               {approvals.length === 0 && (
                 <tr>
-                  <td colSpan={8} className="px-3 py-8 text-center text-slate-500">표시할 결재 건이 없습니다.</td>
+                  <td colSpan={9} className="px-3 py-8 text-center text-slate-500">{projectFilter ? '선택한 현장에 표시할 결재 건이 없습니다.' : '표시할 결재 건이 없습니다.'}</td>
                 </tr>
               )}
             </tbody>
@@ -245,7 +280,7 @@ export function ApprovalInboxPanel({
               <div className="border-b border-slate-200 pb-3">
                 <p className="text-xs font-semibold text-slate-500">{approvalTypeLabel(selectedApproval.approval_type)}</p>
                 <h4 className="mt-1 text-base font-semibold text-slate-950">{selectedApproval.title}</h4>
-                <p className="mt-1 text-sm text-slate-500">{selectedApproval.project_code} · {selectedApproval.project_name || '-'} · {selectedApproval.status}</p>
+                <p className="mt-1 text-sm text-slate-500">{selectedApproval.project_code} · {selectedApproval.project_name || '-'} · {approvalStatusLabel(selectedApproval)}</p>
               </div>
               <div className="space-y-2 py-4 text-sm text-slate-700">
                 <p>요청금액: <strong>{formatWon(selectedApproval.requested_amount)}</strong></p>
@@ -253,6 +288,14 @@ export function ApprovalInboxPanel({
                 <p>증감액: <strong className={varianceClass(selectedApproval.variance_amount)}>{formatWon(selectedApproval.variance_amount)}</strong></p>
                 <p>요청자: {selectedApproval.request_user}</p>
                 <p>요청사유: {selectedApproval.request_reason || '-'}</p>
+                <div className="rounded-md border border-slate-200 bg-white p-3">
+                  <p className="font-semibold text-slate-900">결재선</p>
+                  <p className="mt-1">{selectedApproval.requester_position === 'STAFF' ? `직원 → ${selectedApproval.team_leader_name || '지정 팀장'} → 대표` : '요청자 → 대표'}</p>
+                  {selectedApproval.team_leader_id && <p className="mt-2 text-xs text-slate-600">팀장 승인: {selectedApproval.team_leader_approved_by ? `${selectedApproval.team_leader_approved_by} · ${formatDateTime(selectedApproval.team_leader_approved_at)}` : selectedApproval.status === 'REJECTED' && selectedApproval.approval_stage === 'TEAM_LEADER' ? '반려' : '대기'}</p>}
+                  {selectedApproval.team_leader_comment && <p className="mt-1 text-xs text-slate-600">팀장 의견: {selectedApproval.team_leader_comment}</p>}
+                  {selectedApproval.approver && <p className="mt-1 text-xs text-slate-600">{selectedApproval.status === 'REJECTED' ? '반려자' : '최종 승인자'}: {selectedApproval.approver} · {formatDateTime(selectedApproval.decided_at)}</p>}
+                  <p className="mt-2 text-xs text-cyan-700">재무 회람 · 최종 승인 후 전 직원 공유</p>
+                </div>
                 {selectedApproval.comment && <p>처리의견: {selectedApproval.comment}</p>}
                 {selectedApproval.cancellation_reason && (
                   <p>승인취소 사유: {selectedApproval.cancellation_reason} ({selectedApproval.cancelled_by || '-'} / {formatDate(selectedApproval.cancelled_at?.slice(0, 10))})</p>
@@ -280,12 +323,12 @@ export function ApprovalInboxPanel({
                 <div className="border-t border-slate-200 pt-4">
                   <textarea value={rejectComment} onChange={(event) => setRejectComment(event.target.value)} placeholder="반려 사유" className="input min-h-24" />
                   <div className="mt-3 flex justify-end gap-2">
-                    <PermissionGate permission="APPROVAL_DECIDE"><button type="button" onClick={() => rejectApproval(selectedApproval.approval_id)} disabled={!rejectComment.trim()} className="rounded-md border border-rose-300 px-3 py-2 text-sm font-semibold text-rose-700 hover:bg-rose-50 disabled:cursor-not-allowed disabled:opacity-40">
+                    <button type="button" onClick={() => rejectApproval(selectedApproval.approval_id)} disabled={!rejectComment.trim()} className="rounded-md border border-rose-300 px-3 py-2 text-sm font-semibold text-rose-700 hover:bg-rose-50 disabled:cursor-not-allowed disabled:opacity-40">
                       반려
-                    </button></PermissionGate>
-                    <PermissionGate permission="APPROVAL_DECIDE"><button type="button" onClick={() => approveApproval(selectedApproval.approval_id)} className="rounded-md bg-cyan-700 px-3 py-2 text-sm font-semibold text-white hover:bg-cyan-800">
-                      승인
-                    </button></PermissionGate>
+                    </button>
+                    <button type="button" onClick={() => approveApproval(selectedApproval.approval_id)} className="rounded-md bg-cyan-700 px-3 py-2 text-sm font-semibold text-white hover:bg-cyan-800">
+                      {selectedApproval.approval_stage === 'TEAM_LEADER' ? '1차 승인 후 대표 상신' : '대표 최종 승인'}
+                    </button>
                   </div>
                 </div>
               )}

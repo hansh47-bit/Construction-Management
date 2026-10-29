@@ -69,6 +69,7 @@ public class ApprovalService {
 	private final VendorComparisonAttachmentService vendorComparisonAttachmentService;
 	private final ChangeManagementService changeManagementService;
 	private final ProjectRevisionService projectRevisionService;
+	private final com.construction.management.notification.ApprovalEmailQueue approvalEmails;
 
 	public ApprovalService(
 			ApprovalRepository approvalRepository,
@@ -86,7 +87,8 @@ public class ApprovalService {
 			ExecutionBudgetApprovalAttachmentService attachmentService,
 			VendorComparisonAttachmentService vendorComparisonAttachmentService,
 			ChangeManagementService changeManagementService,
-			ProjectRevisionService projectRevisionService
+			ProjectRevisionService projectRevisionService,
+			com.construction.management.notification.ApprovalEmailQueue approvalEmails
 	) {
 		this.approvalRepository = approvalRepository;
 		this.projectRepository = projectRepository;
@@ -104,6 +106,7 @@ public class ApprovalService {
 		this.vendorComparisonAttachmentService = vendorComparisonAttachmentService;
 		this.changeManagementService = changeManagementService;
 		this.projectRevisionService = projectRevisionService;
+		this.approvalEmails = approvalEmails;
 	}
 
 	@Transactional(readOnly = true)
@@ -201,6 +204,7 @@ public class ApprovalService {
 				requestUser(request),
 				request == null ? null : request.requestReason()
 		);
+		businessPolicy.prepareApproval(approval);
 		approvalRepository.save(approval);
 		attachmentService.saveAll(projectId, approval.getApprovalId(), files);
 		budgetItemRepository.findByProjectIdOrderByItemIdAsc(projectId).forEach(item -> {
@@ -271,6 +275,7 @@ public class ApprovalService {
 				com.construction.management.auth.CurrentActor.name(),
 				requestReason
 		);
+		businessPolicy.prepareApproval(approval);
 		approvalRepository.save(approval);
 		requisition.linkApproval(approval.getApprovalId());
 		requisitionRepository.save(requisition);
@@ -291,6 +296,7 @@ public class ApprovalService {
 				com.construction.management.auth.CurrentActor.name(),
 				purchaseOrder.getPoId() + " 기성 " + claim.getDegree() + "차 승인 요청"
 		);
+		businessPolicy.prepareApproval(approval);
 		approvalRepository.save(approval);
 		claim.linkApproval(approval.getApprovalId());
 		progressClaimRepository.save(claim);
@@ -298,10 +304,17 @@ public class ApprovalService {
 	}
 
 	@Transactional
-	@org.springframework.security.access.prepost.PreAuthorize("@businessPolicy.allow('APPROVAL_DECIDE')")
+	@org.springframework.security.access.prepost.PreAuthorize("@businessPolicy.allow('APPROVAL_DECIDE') or @businessPolicy.allow('APPROVAL_REVIEW')")
 	@com.construction.management.auth.BusinessAction
 	public ApprovalResponse approve(String approvalId, ApprovalDecisionRequest request) {
 		Approval approval = getRequestedApproval(approvalId);
+		businessPolicy.requireApprovalDecision(approval);
+		if (approval.getApprovalStage() == com.construction.management.project.domain.ApprovalStage.TEAM_LEADER) {
+			approval.approveByTeamLeader(request == null ? null : request.comment());
+			approvalRepository.save(approval);
+			approvalEmails.requested(approval);
+			return ApprovalResponse.from(approval, getProject(approval.getProjectId()), detailFor(approval), attachmentsFor(approval));
+		}
 		if (TYPE_EXECUTION_BUDGET.equals(approval.getApprovalType())) {
 			approveExecutionBudget(approval);
 		} else if (TYPE_PURCHASE_ORDER.equals(approval.getApprovalType())) {
@@ -321,14 +334,16 @@ public class ApprovalService {
 		}
 		approval.approve(decisionUser(request), request == null ? null : request.comment());
 		approvalRepository.save(approval);
+		approvalEmails.decided(approval);
 		return ApprovalResponse.from(approval, getProject(approval.getProjectId()), detailFor(approval), attachmentsFor(approval));
 	}
 
 	@Transactional
-	@org.springframework.security.access.prepost.PreAuthorize("@businessPolicy.allow('APPROVAL_DECIDE')")
+	@org.springframework.security.access.prepost.PreAuthorize("@businessPolicy.allow('APPROVAL_DECIDE') or @businessPolicy.allow('APPROVAL_REVIEW')")
 	@com.construction.management.auth.BusinessAction
 	public ApprovalResponse reject(String approvalId, ApprovalDecisionRequest request) {
 		Approval approval = getRequestedApproval(approvalId);
+		businessPolicy.requireApprovalDecision(approval);
 		if (request == null || !StringUtils.hasText(request.comment())) {
 			throw new IllegalArgumentException("반려 사유를 입력해야 합니다.");
 		}
@@ -356,6 +371,7 @@ public class ApprovalService {
 		}
 		approval.reject(decisionUser(request), request.comment());
 		approvalRepository.save(approval);
+		approvalEmails.decided(approval);
 		return ApprovalResponse.from(approval, getProject(approval.getProjectId()), detailFor(approval), attachmentsFor(approval));
 	}
 
@@ -543,7 +559,8 @@ public class ApprovalService {
 	}
 
 	private Approval getRequestedApproval(String approvalId) {
-		Approval approval = getApprovalEntity(approvalId);
+		Approval approval = approvalRepository.findForUpdate(approvalId)
+				.orElseThrow(() -> new EntityNotFoundException("결재 건을 찾을 수 없습니다: " + approvalId));
 		if (approval.getStatus() != ApprovalStatus.REQUESTED) {
 			throw new IllegalStateException("결재 대기 상태의 건만 처리할 수 있습니다.");
 		}

@@ -207,7 +207,35 @@ CREATE TABLE IF NOT EXISTS meeting_attachments (
 	uploaded_by VARCHAR(255) NOT NULL, uploaded_at TIMESTAMP NOT NULL
 );
 
+-- Hibernate does not widen existing H2 native ENUM columns when Java enums grow.
+-- Keep persisted permission values intact while admitting the team-leader review permission.
+ALTER TABLE IF EXISTS position_permissions
+	ALTER COLUMN permission_key ENUM(
+		'APPROVAL_ALL', 'APPROVAL_DECIDE', 'APPROVAL_READ', 'APPROVAL_REVIEW',
+		'BUDGET_READ', 'BUDGET_REQUEST', 'BUDGET_WRITE',
+		'CHANGE_READ', 'CHANGE_REQUEST', 'CHANGE_WRITE', 'CONTRACT_READ', 'CONTRACT_WRITE',
+		'DASHBOARD_READ', 'EXECUTIVE_CORRECT', 'PAYMENT_EXECUTE', 'PAYMENT_REQUEST',
+		'PROCUREMENT_READ', 'PROCUREMENT_REQUEST', 'PROCUREMENT_WRITE',
+		'PROGRESS_READ', 'PROGRESS_WRITE', 'PROJECT_CREATE', 'PROJECT_DELETE', 'PROJECT_READ', 'PROJECT_STATUS',
+		'SETTLEMENT_READ', 'SETTLEMENT_REQUEST', 'SITE_READ', 'SITE_WRITE'
+	);
+
 -- Serialize explicit first-admin bootstrap across concurrent application processes.
 CREATE TABLE IF NOT EXISTS security_locks (id VARCHAR(64) PRIMARY KEY);
 INSERT INTO security_locks(id)
  SELECT 'ADMIN_BOOTSTRAP' WHERE NOT EXISTS (SELECT 1 FROM security_locks WHERE id='ADMIN_BOOTSTRAP');
+
+-- Store mail work in the same transaction as the approval; SMTP runs separately.
+CREATE TABLE IF NOT EXISTS approval_email_notifications (
+    id VARCHAR(200) PRIMARY KEY,
+    approval_id VARCHAR(64) NOT NULL,
+    recipient_user_id VARCHAR(255),
+    event VARCHAR(32) NOT NULL,
+    status VARCHAR(16) NOT NULL,
+    attempts INTEGER NOT NULL DEFAULT 0,
+    created_at TIMESTAMP NOT NULL,
+    next_attempt_at TIMESTAMP NOT NULL,
+    sent_at TIMESTAMP,
+    last_error_code VARCHAR(64)
+);
+CREATE INDEX IF NOT EXISTS ix_approval_email_due ON approval_email_notifications(status, next_attempt_at);

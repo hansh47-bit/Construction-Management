@@ -8,6 +8,10 @@
 - Frontend: React, TypeScript, Vite, Tailwind CSS
 - Encoding: UTF-8
 
+Gmail 결재 알림 연결 방법: [설정 안내](docs/16.approval_email_gmail_setup.md)
+
+자동 반영·새로고침 위치 유지·확인창: [동작 및 검증 안내](docs/17.live_refresh_navigation_feedback.md)
+
 ## Run Backend
 
 ```powershell
@@ -41,5 +45,6 @@ cd backend
 .\gradlew.bat test
 
 cd ..\frontend
+npm test
 npm run build
 ```
