@@ -2,7 +2,7 @@ package com.construction.management.account;
 
 import static org.assertj.core.api.Assertions.*;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.*;
-import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.*;
+import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.authentication;
 
 import com.construction.management.auth.SessionUser;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -49,7 +49,7 @@ class LastAdminConcurrencyIntegrationTest {
  }
  private Callable<Integer> deleteOther(AppUser actor,AppUser target,CountDownLatch ready,CountDownLatch start) {
   return () -> { ready.countDown(); start.await(); var auth=UsernamePasswordAuthenticationToken.authenticated(new SessionUser(actor.getId(),actor.authVersion,actor.name,null),null,List.of());
-   return mvc.perform(delete("/api/v1/admin/users/"+target.getId()).with(authentication(auth)).with(csrf()).contentType(MediaType.APPLICATION_JSON).content(json.writeValueAsString(Map.of("version",target.version,"reason","관리자 동시 삭제 검증")))).andReturn().getResponse().getStatus();
+   return mvc.perform(delete("/api/v1/admin/users/"+target.getId()).with(authentication(auth)).contentType(MediaType.APPLICATION_JSON).content(json.writeValueAsString(Map.of("version",target.version,"reason","관리자 동시 삭제 검증")))).andReturn().getResponse().getStatus();
   };
  }
 }
