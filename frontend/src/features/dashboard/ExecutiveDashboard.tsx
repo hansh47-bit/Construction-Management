@@ -1,12 +1,17 @@
 import { useEffect, useState } from 'react'
 import { AlertTriangle, BarChart3, ClipboardCheck } from 'lucide-react'
 import { getExecutiveDashboard } from './api'
+import { useLiveRefresh } from '../../lib/use-live-refresh'
 
 type Dashboard = { metrics: { label: string; value: string; description: string }[]; workflow: { order: number; phase: string; title: string; owner: string; status: string }[]; approvals: { id: string; title: string; requester: string; amount: string; status: string }[] }
 
 export function ExecutiveDashboard() {
   const [data, setData] = useState<Dashboard | null>(null)
   const [error, setError] = useState<string | null>(null)
+  useLiveRefresh(async () => {
+    const response = await getExecutiveDashboard()
+    if (response.ok) { setData(await response.json()); setError(null) }
+  })
   useEffect(() => { let active = true; void getExecutiveDashboard().then(async (response) => { if (!response.ok) throw new Error(`경영진 대시보드 조회 실패: ${response.status}`); return response.json() }).then((dashboard) => { if (active) setData(dashboard) }).catch((reason) => { if (active) setError(reason instanceof Error ? reason.message : '경영진 대시보드를 불러오지 못했습니다.') }); return () => { active = false } }, [])
   if (error) return <div className="rounded-md border border-amber-200 bg-amber-50 p-4 text-sm text-amber-900">{error}</div>
   if (!data) return <div className="rounded-md border border-slate-200 bg-white p-8 text-center text-sm text-slate-500">경영진 지표를 불러오는 중입니다.</div>

@@ -2,7 +2,7 @@ import { apiUrl, apiFetch } from '../../lib/api-client'
 
 export const procurementApi = {
   comparisons(projectId: string, itemId: string) { return apiFetch(apiUrl(`/api/v1/projects/${projectId}/execution-items/${itemId}/comparisons`)) },
-  saveComparisons(projectId: string, itemId: string, payload: unknown) { return apiFetch(apiUrl(`/api/v1/projects/${projectId}/execution-items/${itemId}/comparisons`), { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) }) },
+  saveComparisons(projectId: string, itemId: string, payload: unknown, announceSave = true) { return apiFetch(apiUrl(`/api/v1/projects/${projectId}/execution-items/${itemId}/comparisons`), { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) }, true, { success: announceSave ? 'default' : 'none' }) },
   uploadComparisonAttachment(projectId: string, itemId: string, comparisonId: string, file: File) {
     const data = new FormData()
     data.append('file', file)

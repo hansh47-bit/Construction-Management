@@ -31,6 +31,9 @@ public class DashboardService {
 	public DashboardResponse getDashboard() {
 		List<Project> projects = projectRepository.findAll();
 		List<Approval> requested = approvalRepository.findByStatusOrderByRequestedAtDesc(ApprovalStatus.REQUESTED);
+		List<Approval> ceoRequested = requested.stream()
+				.filter(approval -> approval.getApprovalStage() == com.construction.management.project.domain.ApprovalStage.CEO)
+				.toList();
 		List<IntegratedSummaryResponse> summaries = projects.stream().map(project -> projectService.getIntegratedSummary(project.getProjectId())).toList();
 		BigDecimal expectedProfit = summaries.stream().map(summary -> summary.profitAndBalance().expectedProfit()).reduce(BigDecimal.ZERO, BigDecimal::add);
 		BigDecimal expectedCost = summaries.stream().map(summary -> summary.profitAndBalance().expectedFinalCost()).reduce(BigDecimal.ZERO, BigDecimal::add);
@@ -40,12 +43,12 @@ public class DashboardService {
 		return new DashboardResponse(
 				List.of(
 						new MetricResponse("진행 프로젝트", String.valueOf(projects.stream().filter(project -> !"정산완료".equals(project.getStatus().name())).count()), "전체 " + projects.size() + "개 프로젝트"),
-						new MetricResponse("대표 결재 대기", String.valueOf(requested.size()) + "건", "실행예산·발주·변경·기성·지급 결재"),
+						new MetricResponse("대표 결재 대기", String.valueOf(ceoRequested.size()) + "건", "팀장 검토를 마친 건과 대표 직행 결재"),
 						new MetricResponse("예상 이익률", margin + "%", "예상 이익 " + won(expectedProfit) + " / 예상 원가 " + won(expectedCost)),
 						new MetricResponse("총 미지급 잔액", won(unpaid), "승인 기성 및 향후 지급 포함")
 				),
 				getWorkflow(projects, requested),
-				requested.stream().limit(10).map(approval -> new ApprovalResponse(approval.getApprovalId(), approval.getTitle(), approval.getRequestUser(), won(approval.getRequestedAmount()), "대기")).toList()
+				ceoRequested.stream().limit(10).map(approval -> new ApprovalResponse(approval.getApprovalId(), approval.getTitle(), approval.getRequestUser(), won(approval.getRequestedAmount()), "대표 결재 대기")).toList()
 		);
 	}
 

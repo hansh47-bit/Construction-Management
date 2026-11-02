@@ -1,6 +1,9 @@
 import { useAuth } from '../auth/auth'
 import { CalendarDays, CheckCircle2, ChevronLeft, ChevronRight, ImagePlus, LoaderCircle, Plus, Save, Trash2, X } from 'lucide-react'
 import { useEffect, useMemo, useState } from 'react'
+import { confirmAction } from '../../lib/feedback'
+import { useDraftGuard, useLiveRefresh } from '../../lib/use-live-refresh'
+import { useWorkspaceState } from '../../lib/use-workspace-state'
 import { apiUrl } from '../../lib/api-client'
 import type { DailyLog, DailyLogPayload, Project } from '../../types/domain'
 import { siteRecordsApi } from './api'
@@ -15,11 +18,14 @@ function statusStyle(status: string) { return status === 'SHARED' ? 'bg-emerald-
 export function DailyLogPanel({ project, projectId }: { project?: Project; projectId: string }) {
   const { can, user } = useAuth()
   const [logs, setLogs] = useState<DailyLog[]>([])
-  const [selectedDate, setSelectedDate] = useState(dateText(new Date()))
-  const [month, setMonth] = useState(() => new Date(new Date().getFullYear(), new Date().getMonth(), 1))
+  const [selectedDate, setSelectedDate] = useWorkspaceState<string>('dailyDate', dateText(new Date()))
+  const [month, setMonth] = useState(() => { const restored = new Date(selectedDate); const date = Number.isNaN(restored.getTime()) ? new Date() : restored; return new Date(date.getFullYear(), date.getMonth(), 1) })
   const [form, setForm] = useState<DailyLogPayload>(emptyLog())
   const [editingId, setEditingId] = useState<string | null>(null)
   const [open, setOpen] = useState(false)
+  const [baseline, setBaseline] = useState(() => JSON.stringify(form))
+  useDraftGuard(open && JSON.stringify(form) !== baseline)
+  useLiveRefresh(load)
   const [notice, setNotice] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [saving, setSaving] = useState(false)
@@ -33,8 +39,8 @@ export function DailyLogPanel({ project, projectId }: { project?: Project; proje
     setLogs(await response.json() as DailyLog[])
   }
   useEffect(() => { void load().catch((e: unknown) => setError(e instanceof Error ? e.message : '작업일지를 불러오지 못했습니다.')) }, [projectId])
-  function openCreate(date = selectedDate) { if (readOnly) return; setEditingId(null); setForm(emptyLog(date)); setOpen(true); setError(null); setNotice(null) }
-  function openEdit(log: DailyLog) { if (readOnly || !own(log)) return; const { daily_log_id, project_id, created_at, updated_at, photos, ...payload } = log; void daily_log_id; void project_id; void created_at; void updated_at; void photos; setEditingId(log.daily_log_id); setForm(payload); setOpen(true); setError(null); setNotice(null) }
+  function openCreate(date = selectedDate) { if (readOnly) return; const draft = emptyLog(date); setBaseline(JSON.stringify(draft)); setEditingId(null); setForm(draft); setOpen(true); setError(null); setNotice(null) }
+  function openEdit(log: DailyLog) { if (readOnly || !own(log)) return; const { daily_log_id, project_id, created_at, updated_at, photos, ...payload } = log; void daily_log_id; void project_id; void created_at; void updated_at; void photos; setBaseline(JSON.stringify(payload)); setEditingId(log.daily_log_id); setForm(payload); setOpen(true); setError(null); setNotice(null) }
   async function save() { if (readOnly) return;
     if (!form.site_manager_name.trim()) { setError('현장 책임자(작성자)를 입력하세요.'); return }
     setSaving(true); setError(null)
@@ -42,13 +48,13 @@ export function DailyLogPanel({ project, projectId }: { project?: Project; proje
       const response = editingId ? await siteRecordsApi.updateDailyLog(projectId, editingId, form) : await siteRecordsApi.createDailyLog(projectId, form)
       if (!response.ok) throw new Error((await response.text()) || `저장 실패: ${response.status}`)
       const saved = await response.json() as DailyLog
-      setEditingId(saved.daily_log_id); const { daily_log_id, project_id, created_at, updated_at, photos, ...payload } = saved; void daily_log_id; void project_id; void created_at; void updated_at; void photos; setForm(payload)
+      setEditingId(saved.daily_log_id); const { daily_log_id, project_id, created_at, updated_at, photos, ...payload } = saved; void daily_log_id; void project_id; void created_at; void updated_at; void photos; setBaseline(JSON.stringify(payload)); setForm(payload)
       await load(); setSelectedDate(saved.log_date); setNotice('현장 작업일지가 저장되었습니다.')
     } catch (e) { setError(e instanceof Error ? e.message : '저장하지 못했습니다.') } finally { setSaving(false) }
   }
-  async function remove(log: DailyLog) { if (readOnly || !own(log)) return; if (!window.confirm(`${log.log_date} 작업일지를 삭제하시겠습니까? 공유된 일지는 보관 처리됩니다.`)) return; const response = await siteRecordsApi.deleteDailyLog(projectId, log.daily_log_id); if (!response.ok) { setError(`삭제 실패: ${response.status}`); return }; await load(); setNotice('작업일지를 삭제 또는 보관 처리했습니다.') }
-  async function uploadPhoto(file: File | null, phase: string) { if (readOnly) return; if (!file || !editingId) return; const body = new FormData(); body.append('file', file); body.append('phase', phase); body.append('uploadedBy', form.created_by || '현장 담당자'); const response = await siteRecordsApi.uploadPhoto(projectId, editingId, body); if (!response.ok) { setError(`사진 업로드 실패: ${response.status}`); return }; const saved = await response.json() as DailyLog; const { daily_log_id, project_id, created_at, updated_at, photos, ...payload } = saved; void daily_log_id; void project_id; void created_at; void updated_at; void photos; setForm(payload); await load() }
-  async function removePhoto(photoId: string) { if (readOnly) return; if (!editingId) return; const response = await siteRecordsApi.deletePhoto(projectId, editingId, photoId); if (!response.ok) { setError(`사진 삭제 실패: ${response.status}`); return }; const saved = await response.json() as DailyLog; const { daily_log_id, project_id, created_at, updated_at, photos, ...payload } = saved; void daily_log_id; void project_id; void created_at; void updated_at; void photos; setForm(payload); await load() }
+  async function remove(log: DailyLog) { if (readOnly || !own(log)) return; if (!await confirmAction({ title: '작업일지 삭제 확인', message: `${log.log_date} 작업일지를 삭제하시겠습니까? 공유된 일지는 보관 처리됩니다.`, confirmLabel: '삭제·보관', destructive: true })) return; const response = await siteRecordsApi.deleteDailyLog(projectId, log.daily_log_id); if (!response.ok) { setError(`삭제 실패: ${response.status}`); return }; await load(); setNotice('작업일지를 삭제 또는 보관 처리했습니다.') }
+  async function uploadPhoto(file: File | null, phase: string) { if (readOnly) return; if (!file || !editingId) return; const body = new FormData(); body.append('file', file); body.append('phase', phase); body.append('uploadedBy', form.created_by || '현장 담당자'); const response = await siteRecordsApi.uploadPhoto(projectId, editingId, body); if (!response.ok) { setError(`사진 업로드 실패: ${response.status}`); return }; await load() }
+  async function removePhoto(photoId: string) { if (readOnly) return; if (!editingId) return; if (!await confirmAction({ title: '사진 삭제 확인', message: '선택한 현장 사진을 삭제하시겠습니까?', confirmLabel: '사진 삭제', destructive: true })) return; const response = await siteRecordsApi.deletePhoto(projectId, editingId, photoId); if (!response.ok) { setError(`사진 삭제 실패: ${response.status}`); return }; await load() }
 
   const days = useMemo(() => { const start = new Date(month.getFullYear(), month.getMonth(), 1); const first = new Date(start); first.setDate(1 - start.getDay()); return Array.from({ length: 42 }, (_, i) => { const day = new Date(first); day.setDate(first.getDate() + i); return day }) }, [month])
   const formPhotos = editingId ? logs.find((log) => log.daily_log_id === editingId)?.photos ?? [] : []

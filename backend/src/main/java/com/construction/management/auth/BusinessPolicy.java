@@ -4,14 +4,47 @@ import com.construction.management.project.domain.*;
 import jakarta.persistence.*;
 import java.util.*;
 import org.springframework.stereotype.Component;
-import org.springframework.security.access.AccessDeniedException;
+//import org.springframework.security.access.AccessDeniedException;
+
 @Component
 public class BusinessPolicy {
  private final PermissionService permissions; private final CurrentActor actor; private final EntityManager em; private final DraftOwnershipRepository owners;
- public BusinessPolicy(PermissionService permissions,CurrentActor actor,EntityManager em,DraftOwnershipRepository owners) { this.permissions=permissions; this.actor=actor; this.em=em; this.owners=owners; }
+ private final com.construction.management.notification.ApprovalEmailQueue approvalEmails;
+ public BusinessPolicy(PermissionService permissions,CurrentActor actor,EntityManager em,DraftOwnershipRepository owners,com.construction.management.notification.ApprovalEmailQueue approvalEmails) { this.permissions=permissions; this.actor=actor; this.em=em; this.owners=owners; this.approvalEmails=approvalEmails; }
  public boolean allow(String key) { return permissions.has(Permission.valueOf(key)); }
  public void require(String key) { permissions.require(Permission.valueOf(key)); }
- public boolean canSeeApproval(Approval a) { return permissions.has(Permission.APPROVAL_ALL) || Objects.equals(a.getCreatedUserId(),CurrentActor.id()); }
+ public boolean canSeeApproval(Approval a) {
+  AppUser user=actor.user();
+  if(user.getAccountType()!=AccountType.USER || !permissions.has(Permission.APPROVAL_READ)) return false;
+  if(a.getStatus()==ApprovalStatus.APPROVED) return true;
+  if(user.getPosition()==Position.STAFF) return Objects.equals(a.getCreatedUserId(),user.getId());
+  if(user.getPosition()==Position.FINANCE || user.getPosition()==Position.CEO) return true;
+  return Objects.equals(a.getCreatedUserId(),user.getId()) || Objects.equals(a.getTeamLeaderId(),user.getId()) || permissions.has(Permission.APPROVAL_ALL);
+ }
+ public void prepareApproval(Approval approval) {
+  AppUser requester=actor.user();
+  if(requester.getAccountType()!=AccountType.USER) throw new org.springframework.security.access.AccessDeniedException("업무 계정만 결재를 요청할 수 있습니다.");
+  if("PAYMENT".equals(approval.getApprovalType()) && requester.getPosition()!=Position.FINANCE) throw new org.springframework.security.access.AccessDeniedException("업체별 지급 결재는 재무만 요청할 수 있습니다.");
+  AppUser leader=null;
+  if(requester.getPosition()==Position.STAFF) {
+   Project project=em.find(Project.class,approval.getProjectId());
+   if(project==null) throw new EntityNotFoundException("프로젝트를 찾을 수 없습니다.");
+   leader=project.getTeamLeaderId()==null ? null : em.find(AppUser.class,project.getTeamLeaderId());
+   if(leader==null || leader.getAccountType()!=AccountType.USER || leader.getPosition()!=Position.TEAM_LEADER || leader.getStatus()!=AccountStatus.ACTIVE) throw new IllegalStateException("직원 결재 요청 전에 프로젝트에 활성 팀장 계정을 지정하세요.");
+  }
+  approval.configureRoute(requester.getPosition().name(),leader==null?null:leader.getId(),leader==null?null:leader.getName());
+  approvalEmails.requested(approval);
+ }
+ public boolean canDecideApproval(Approval approval) {
+  if(approval.getStatus()!=ApprovalStatus.REQUESTED || !canSeeApproval(approval)) return false;
+  AppUser user=actor.user();
+  if(approval.getApprovalStage()==ApprovalStage.TEAM_LEADER) return user.getPosition()==Position.TEAM_LEADER && Objects.equals(approval.getTeamLeaderId(),user.getId()) && permissions.has(Permission.APPROVAL_REVIEW);
+  return user.getPosition()==Position.CEO && permissions.has(Permission.APPROVAL_DECIDE);
+ }
+ public void requireApprovalDecision(Approval approval) {
+  if(!canSeeApproval(approval)) throw new EntityNotFoundException("자료를 찾을 수 없습니다.");
+  if(!canDecideApproval(approval)) throw new org.springframework.security.access.AccessDeniedException("현재 결재 단계의 지정 결재자만 승인·반려할 수 있습니다.");
+ }
  public void approval(String id) { Approval a=em.find(Approval.class,id); if(a==null || !canSeeApproval(a)) throw new EntityNotFoundException("자료를 찾을 수 없습니다."); }
  public void ownEntity(Class<? extends AuthoredEntity> type,String id) {
   AuthoredEntity entity=em.find(type,id); if(entity==null) throw new EntityNotFoundException("자료를 찾을 수 없습니다.");

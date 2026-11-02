@@ -180,11 +180,13 @@ public class ProjectSettlementService {
 				request.unpaidHandlingReason()
 		);
 		settlementRepository.save(settlement);
-		approvalRepository.save(new Approval(
+		Approval approval = new Approval(
 				nextSettlementApprovalId(), projectId, "FINAL_SETTLEMENT", settlement.getSettlementId(), "준공정산 최종 승인 요청",
 				snapshot.finalCost(), snapshot.finalContractAmount(), snapshot.finalProfit(),
 				com.construction.management.auth.CurrentActor.name(), request.settlementNotes()
-		));
+		);
+		businessPolicy.prepareApproval(approval);
+		approvalRepository.save(approval);
 		project.changeStatus(ProjectStatus.정산중);
 		projectRepository.save(project);
 		BigDecimal approvedSiteExpenseAmount = approvedDirectSettlementAmount(projectId, revision, "현장경비");
@@ -208,7 +210,7 @@ public class ProjectSettlementService {
 	}
 
 	@Transactional
-	@org.springframework.security.access.prepost.PreAuthorize("@businessPolicy.allow('APPROVAL_DECIDE')")
+	@org.springframework.security.access.prepost.PreAuthorize("@businessPolicy.allow('APPROVAL_DECIDE') or @businessPolicy.allow('APPROVAL_REVIEW')")
 	public void rejectRequestedSettlement(String projectId, String settlementId) {
 		ProjectSettlement settlement = settlementRepository.findById(settlementId)
 				.orElseThrow(() -> new EntityNotFoundException("준공정산 요청을 찾을 수 없습니다: " + settlementId));

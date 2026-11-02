@@ -48,7 +48,14 @@ public record ApprovalResponse(
 		List<Attachment> attachments,
         @JsonProperty("request_user_id") String requestUserId,
         @JsonProperty("approver_user_id") String approverUserId,
-        @JsonProperty("cancelled_user_id") String cancelledUserId
+        @JsonProperty("cancelled_user_id") String cancelledUserId,
+        @JsonProperty("approval_stage") String approvalStage,
+        @JsonProperty("requester_position") String requesterPosition,
+        @JsonProperty("team_leader_id") String teamLeaderId,
+        @JsonProperty("team_leader_name") String teamLeaderName,
+        @JsonProperty("team_leader_approved_by") String teamLeaderApprovedBy,
+        @JsonProperty("team_leader_approved_at") LocalDateTime teamLeaderApprovedAt,
+        @JsonProperty("team_leader_comment") String teamLeaderComment
 ) {
 	public static ApprovalResponse from(Approval approval, Project project) {
 		return from(approval, project, null);
@@ -82,7 +89,9 @@ public record ApprovalResponse(
 				approval.getCancelledAt(),
 			detail,
 			attachments == null ? List.of() : attachments,
-            approval.getCreatedUserId(), approval.getApproverUserId(), approval.getCancelledUserId()
+            approval.getCreatedUserId(), approval.getApproverUserId(), approval.getCancelledUserId(),
+            approval.getApprovalStage().name(), approval.getRequesterPosition(), approval.getTeamLeaderId(),
+            approval.getTeamLeaderName(), approval.getTeamLeaderApprovedBy(), approval.getTeamLeaderApprovedAt(), approval.getTeamLeaderComment()
 		);
 	}
 
