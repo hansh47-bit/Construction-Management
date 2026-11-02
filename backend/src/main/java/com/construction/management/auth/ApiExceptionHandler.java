@@ -1,5 +1,7 @@
 package com.construction.management.auth;
 import jakarta.persistence.EntityNotFoundException;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.dao.*;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.AccessDeniedException;
@@ -11,6 +13,7 @@ import org.springframework.web.server.ResponseStatusException;
 import org.springframework.http.converter.HttpMessageNotReadableException;
 @RestControllerAdvice
 public class ApiExceptionHandler {
+ private static final Logger log=LoggerFactory.getLogger(ApiExceptionHandler.class);
  private final com.construction.management.account.AuditService audit; private final CurrentActor actor;
  public ApiExceptionHandler(com.construction.management.account.AuditService audit, CurrentActor actor) { this.audit=audit; this.actor=actor; }
  @ExceptionHandler(ApiException.class) ResponseEntity<?> api(ApiException e) { return error(e.getStatus(),e.getCode(),e.getMessage()); }
@@ -22,6 +25,9 @@ public class ApiExceptionHandler {
  @ExceptionHandler(ResponseStatusException.class) ResponseEntity<?> status(ResponseStatusException e) { return error(e.getStatusCode().value(),"BUSINESS_ERROR",e.getReason()==null ? "요청을 처리할 수 없습니다." : e.getReason()); }
  @ExceptionHandler(org.springframework.web.servlet.resource.NoResourceFoundException.class) ResponseEntity<?> resource(Exception e) { return error(404,"NOT_FOUND","자료를 찾을 수 없습니다."); }
  @ExceptionHandler(org.springframework.web.multipart.MaxUploadSizeExceededException.class) ResponseEntity<?> upload(Exception e) { return error(400,"FILE_TOO_LARGE","허용된 파일 크기를 초과했습니다."); }
- @ExceptionHandler(Exception.class) ResponseEntity<?> unexpected(Exception e) { return error(500,"INTERNAL_ERROR","요청을 처리하지 못했습니다. 요청 ID와 함께 관리자에게 문의하세요."); }
+ @ExceptionHandler(Exception.class) ResponseEntity<?> unexpected(Exception e) {
+  log.error("Unhandled request exception request_id={}",ApiErrors.requestId(),e);
+  return error(500,"INTERNAL_ERROR","요청을 처리하지 못했습니다. 요청 ID와 함께 관리자에게 문의하세요.");
+ }
  private ResponseEntity<?> error(int status,String code,String message) { if(status>=400 && !code.equals("LOGIN_FAILED")) audit.event(CurrentActor.optionalId()==null?null:actor.user(),code.equals("FORBIDDEN")?"ACCESS_DENIED":"REQUEST_REJECTED",null,"FAILURE"); return ResponseEntity.status(status).body(ApiErrors.body(code,message)); }
 }

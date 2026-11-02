@@ -2,8 +2,10 @@ package com.construction.management;
 
 import org.springframework.boot.SpringApplication;
 import org.springframework.boot.autoconfigure.SpringBootApplication;
+import org.springframework.boot.context.properties.ConfigurationPropertiesScan;
 
 @SpringBootApplication
+@ConfigurationPropertiesScan // 👈 이 어노테이션 추가
 public class BackendApplication {
 
 	public static void main(String[] args) {

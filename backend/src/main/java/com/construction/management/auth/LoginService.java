@@ -8,9 +8,10 @@ import org.springframework.transaction.annotation.Transactional;
 @Service
 public class LoginService {
  private final AppUserRepository users; private final PasswordEncoder encoder; private final AuditService audit;
+ private final LoginSecurityProperties settings;
  private final String dummyHash; private final ConcurrentHashMap<String,Attempt> sources=new ConcurrentHashMap<>();
  private record Attempt(int count,Instant until) {}
- public LoginService(AppUserRepository users,PasswordEncoder encoder,AuditService audit) { this.users=users; this.encoder=encoder; this.audit=audit; dummyHash=encoder.encode(java.util.UUID.randomUUID().toString()); }
+ public LoginService(AppUserRepository users,PasswordEncoder encoder,AuditService audit,LoginSecurityProperties settings) { this.users=users; this.encoder=encoder; this.audit=audit; this.settings=settings; dummyHash=encoder.encode(java.util.UUID.randomUUID().toString()); }
  @Transactional(noRollbackFor=ApiException.class)
  public AppUser authenticate(String login,String password,String source) {
   String id=PasswordPolicy.normalizeLogin(login);
@@ -21,7 +22,7 @@ public class LoginService {
   AppUser u=users.lockByLoginId(id).orElse(null);
   boolean match=encoder.matches(password==null ? "" : password,u==null ? dummyHash : u.getPasswordHash());
   if(u==null || u.getStatus()!=AccountStatus.ACTIVE || u.locked() || !match) {
-   if(u!=null && u.getStatus()==AccountStatus.ACTIVE && !u.locked()) { u.loginFailed(); users.flush(); }
+   if(u!=null && u.getStatus()==AccountStatus.ACTIVE && !u.locked()) { u.loginFailed(settings.maxFailedAttempts(),settings.lockMinutes()); users.flush(); }
    audit.event(u,u!=null && u.locked()?"LOGIN_LOCKED":"LOGIN_FAILURE",u==null?null:u.getId(),"FAILURE");
    throw new ApiException(401,"LOGIN_FAILED","로그인 ID 또는 비밀번호를 확인하세요.");
   }
