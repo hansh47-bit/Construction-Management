@@ -35,7 +35,7 @@ public class AppUser {
   this.loginId=loginId; this.passwordHash=hash; this.name=name; this.accountType=type; this.position=position; this.createdBy=actor;
  }
  public boolean locked() { return lockedUntil != null && lockedUntil.isAfter(LocalDateTime.now()); }
- public void loginFailed(int maxFailedAttempts,int lockMinutes) { if (++failedLoginCount >= maxFailedAttempts) lockedUntil=LocalDateTime.now().plusMinutes(lockMinutes); }
+ public void loginFailed() { if (++failedLoginCount >= 5) lockedUntil=LocalDateTime.now().plusMinutes(15); }
  public void loginSucceeded() { failedLoginCount=0; lockedUntil=null; lastLoginAt=LocalDateTime.now(); }
  public void changePassword(String hash, boolean temporary, String actor) { passwordHash=hash; mustChangePassword=temporary; authVersion++; touch(actor); }
  public void unlock(String actor) { failedLoginCount=0; lockedUntil=null; touch(actor); }

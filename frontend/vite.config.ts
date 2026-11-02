@@ -3,9 +3,7 @@ import tailwindcss from '@tailwindcss/vite'
 import { defineConfig } from 'vite'
 
 // https://vite.dev/config/
-export default defineConfig(({ mode }) => ({
-  // The Linux bundle serves the frontend and API from the same Spring Boot origin.
-  define: mode === 'linux' ? { 'import.meta.env.VITE_API_BASE_URL': JSON.stringify('') } : {},
+export default defineConfig({
   plugins: [react(), tailwindcss()],
   server: {
     host: '0.0.0.0',
@@ -19,4 +17,4 @@ export default defineConfig(({ mode }) => ({
       },
     },
   },
-}))
+})

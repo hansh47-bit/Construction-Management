@@ -30,7 +30,7 @@ try {
         Write-Host "Database backup: $backupPath"
     }
 
-    $securePassword = Read-Host 'Temporary administrator password (8-64 characters, UTF-8 <=72 bytes)' -AsSecureString
+    $securePassword = Read-Host 'Temporary administrator password (12-64 characters, UTF-8 <=72 bytes)' -AsSecureString
     $env:BOOTSTRAP_ADMIN_LOGIN = $Login
     $env:BOOTSTRAP_ADMIN_NAME = $Name
     $env:BOOTSTRAP_ADMIN_PASSWORD = [Net.NetworkCredential]::new('', $securePassword).Password
